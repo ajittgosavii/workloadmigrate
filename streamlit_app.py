@@ -233,26 +233,50 @@ st.markdown("""
     [data-baseweb="tab-highlight"] { background-color: #0052CC !important; }
     [data-baseweb="tab-border"] { background-color: #E9ECEF !important; }
 
-    /* Buttons — explicit backgrounds to prevent dark mode bleed */
+    /* Buttons — light blue style to guarantee visibility in dark mode */
+    /* Button CONTAINERS — kill any dark wrapper backgrounds */
+    .stButton, .stDownloadButton,
+    [data-testid="stDownloadButton"],
+    .stButton > div, .stDownloadButton > div,
+    [data-testid="stDownloadButton"] > div,
+    .stElementContainer:has(.stButton),
+    .stElementContainer:has(.stDownloadButton),
+    .stElementContainer:has([data-testid="stDownloadButton"]) {
+        background-color: transparent !important;
+        background: transparent !important;
+    }
     .stButton > button[kind="primary"],
     .stButton > button[data-testid="baseButton-primary"] {
-        color: #FFFFFF !important; background-color: #0052CC !important; border-color: #0052CC !important;
+        color: #003D99 !important; background-color: #E6F0FF !important; border: 2px solid #0052CC !important;
+        font-weight: 600 !important;
     }
     .stButton > button[kind="secondary"],
     .stButton > button[data-testid="baseButton-secondary"] {
-        color: #1A2B3C !important; background-color: #FFFFFF !important; border: 1px solid #DEE2E6 !important;
+        color: #1A2B3C !important; background-color: #E6F0FF !important; border: 1px solid #B3D4FF !important;
     }
     .stButton > button {
-        color: #FFFFFF !important; background-color: #0052CC !important; border-color: #0052CC !important;
+        color: #003D99 !important; background-color: #E6F0FF !important; border: 2px solid #0052CC !important;
+        font-weight: 600 !important;
+    }
+    .stButton > button:hover, .stButton > button:focus,
+    .stButton > button:active {
+        color: #003D99 !important; background-color: #CCE0FF !important; border-color: #003D99 !important;
     }
     .stDownloadButton > button,
     .stDownloadButton > button:hover,
-    [data-testid="stDownloadButton"] > button {
-        color: #FFFFFF !important; background-color: #0052CC !important; border-color: #0052CC !important;
+    .stDownloadButton > button:focus,
+    .stDownloadButton > button:active,
+    [data-testid="stDownloadButton"] > button,
+    [data-testid="stDownloadButton"] > button:hover {
+        color: #003D99 !important; background-color: #E6F0FF !important; border: 2px solid #0052CC !important;
+        font-weight: 600 !important;
     }
     /* Sidebar buttons use lighter style */
     [data-testid="stSidebar"] .stButton > button {
-        color: #1A2B3C !important; background-color: #FFFFFF !important; border: 1px solid #DEE2E6 !important;
+        color: #1A2B3C !important; background-color: #F0F4FF !important; border: 1px solid #B3D4FF !important;
+    }
+    [data-testid="stSidebar"] .stButton > button:hover {
+        color: #003D99 !important; background-color: #E6F0FF !important;
     }
 
     /* Text inputs / password fields */
@@ -302,14 +326,18 @@ st.markdown("""
     /* Glide data grid (Streamlit's table component) */
     [data-testid="glide-data-grid-canvas"] { background-color: #FFFFFF !important; }
 
-    /* File uploader */
+    /* File uploader — all containers and children forced light */
     [data-testid="stFileUploader"],
     [data-testid="stFileUploader"] > div,
+    [data-testid="stFileUploader"] > div > div,
     [data-testid="stFileUploader"] section,
     [data-testid="stFileUploaderDropzone"],
-    [data-testid="stFileUploaderDropzoneInput"] {
-        background-color: #F4F6F9 !important;
-        border-color: #DEE2E6 !important;
+    [data-testid="stFileUploaderDropzoneInput"],
+    .stFileUploader, .stFileUploader > div,
+    .uploadedFile {
+        background-color: #F0F4FF !important;
+        background: #F0F4FF !important;
+        border-color: #B3D4FF !important;
         color: #1A2B3C !important;
     }
     [data-testid="stFileUploader"] label,
@@ -319,6 +347,23 @@ st.markdown("""
     [data-testid="stFileUploaderDropzone"] span,
     [data-testid="stFileUploaderDropzone"] div { color: #1A2B3C !important; }
     [data-testid="stFileUploaderDropzone"] small { color: #5A6B7D !important; }
+    /* Browse files button inside file uploader */
+    [data-testid="stFileUploaderDropzone"] button,
+    [data-testid="stFileUploader"] button,
+    [data-testid="stFileUploaderDropzoneInput"] button,
+    .uploadedFile button {
+        color: #003D99 !important; background-color: #E6F0FF !important;
+        background: #E6F0FF !important; border: 1px solid #0052CC !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stFileUploaderDropzone"] button:hover,
+    [data-testid="stFileUploader"] button:hover {
+        background-color: #CCE0FF !important; background: #CCE0FF !important;
+    }
+    /* Upload icon */
+    [data-testid="stFileUploaderDropzone"] svg {
+        fill: #0052CC !important; color: #0052CC !important;
+    }
     /* Uploaded file name */
     [data-testid="stFileUploaderFile"] { background-color: #FFFFFF !important; color: #1A2B3C !important; }
     [data-testid="stFileUploaderFile"] span { color: #1A2B3C !important; }
@@ -355,6 +400,33 @@ st.markdown("""
     footer { background-color: #FFFFFF !important; color: #5A6B7D !important; }
     footer a { color: #0052CC !important; }
 
+    /* ══════════════════════════════════════════════════════════════════
+       NUCLEAR CATCH-ALL — Force light blue on ANY remaining dark element
+       This catches Streamlit Cloud dark mode containers we missed above.
+       ══════════════════════════════════════════════════════════════════ */
+    [data-theme="dark"] div,
+    [data-theme="dark"] section,
+    [data-theme="dark"] header,
+    [data-theme="dark"] footer,
+    [data-theme="dark"] aside,
+    [data-theme="dark"] main,
+    [data-theme="dark"] nav {
+        background-color: #FFFFFF !important;
+        color: #1A2B3C !important;
+    }
+    [data-theme="dark"] button {
+        background-color: #E6F0FF !important;
+        color: #003D99 !important;
+        border-color: #0052CC !important;
+    }
+    /* Element containers — wrappers Streamlit adds around each widget */
+    .stElementContainer,
+    [data-testid="stElementContainer"],
+    [data-testid="element-container"],
+    .element-container {
+        background-color: transparent !important;
+        background: transparent !important;
+    }
     /* Scrollbar for light theme */
     ::-webkit-scrollbar { background: #F4F6F9; width: 8px; }
     ::-webkit-scrollbar-thumb { background: #C4CDD5; border-radius: 4px; }
