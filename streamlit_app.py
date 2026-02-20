@@ -207,8 +207,13 @@ st.markdown("""
     [data-testid="stSidebar"] .stSelectbox label,
     [data-testid="stSidebar"] .stTextInput label { color: #5A6B7D !important; }
     [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #1A2B3C !important; }
-    /* Sidebar separator */
-    [data-testid="stSidebar"] hr { border-color: #DEE2E6 !important; }
+    /* Sidebar separator / dividers */
+    [data-testid="stSidebar"] hr,
+    [data-testid="stSidebar"] [data-testid="stSeparator"],
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] hr {
+        border-color: #DEE2E6 !important; background-color: transparent !important;
+        background: transparent !important; color: #DEE2E6 !important;
+    }
 
     /* All text everywhere */
     .stMarkdown, .stMarkdown p, .stMarkdown span, .stMarkdown li,
@@ -228,11 +233,27 @@ st.markdown("""
     [data-baseweb="tab-highlight"] { background-color: #0052CC !important; }
     [data-baseweb="tab-border"] { background-color: #E9ECEF !important; }
 
-    /* Buttons — primary keeps white text, secondary/outline gets dark */
-    .stButton > button[kind="primary"] { color: #FFFFFF !important; }
-    .stButton > button[kind="secondary"] { color: #1A2B3C !important; background-color: #FFFFFF !important; border-color: #DEE2E6 !important; }
-    .stButton > button { color: #FFFFFF !important; }
-    .stDownloadButton > button { color: #FFFFFF !important; }
+    /* Buttons — explicit backgrounds to prevent dark mode bleed */
+    .stButton > button[kind="primary"],
+    .stButton > button[data-testid="baseButton-primary"] {
+        color: #FFFFFF !important; background-color: #0052CC !important; border-color: #0052CC !important;
+    }
+    .stButton > button[kind="secondary"],
+    .stButton > button[data-testid="baseButton-secondary"] {
+        color: #1A2B3C !important; background-color: #FFFFFF !important; border: 1px solid #DEE2E6 !important;
+    }
+    .stButton > button {
+        color: #FFFFFF !important; background-color: #0052CC !important; border-color: #0052CC !important;
+    }
+    .stDownloadButton > button,
+    .stDownloadButton > button:hover,
+    [data-testid="stDownloadButton"] > button {
+        color: #FFFFFF !important; background-color: #0052CC !important; border-color: #0052CC !important;
+    }
+    /* Sidebar buttons use lighter style */
+    [data-testid="stSidebar"] .stButton > button {
+        color: #1A2B3C !important; background-color: #FFFFFF !important; border: 1px solid #DEE2E6 !important;
+    }
 
     /* Text inputs / password fields */
     [data-baseweb="input"],
@@ -317,8 +338,11 @@ st.markdown("""
     /* Spinner / progress */
     .stSpinner > div { color: #5A6B7D !important; }
 
-    /* Dividers */
-    hr { border-color: #DEE2E6 !important; }
+    /* Dividers / separators everywhere */
+    hr, [data-testid="stSeparator"] {
+        border-color: #DEE2E6 !important; background-color: transparent !important;
+        background: transparent !important;
+    }
 
     /* Plotly chart containers */
     [data-testid="stPlotlyChart"] { background-color: #FFFFFF !important; }
