@@ -1,0 +1,16 @@
+# Secrets — never commit
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Test data / cache
+.pytest_cache/
+TestData*.xlsx
+
+# IDE
+.vscode/
+.idea/
