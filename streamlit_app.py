@@ -138,6 +138,57 @@ st.markdown("""
         --text:#1A2B3C; --text-secondary:#5A6B7D; --text-muted:#8896A6;
         --border:#DEE2E6; --border-light:#E9ECEF;
     }
+    /* ── Force light theme (override Streamlit dark mode / user preference) ── */
+    .stApp, .stApp > header, [data-testid="stAppViewContainer"],
+    [data-testid="stAppViewBlockContainer"], .main, .block-container {
+        background-color: #FFFFFF !important; color: #1A2B3C !important;
+    }
+    [data-testid="stSidebar"], [data-testid="stSidebar"] > div:first-child {
+        background-color: #F4F6F9 !important; color: #1A2B3C !important;
+    }
+    [data-testid="stSidebar"] * { color: #1A2B3C !important; }
+    [data-testid="stSidebar"] .stMarkdown p,
+    [data-testid="stSidebar"] .stMarkdown span,
+    [data-testid="stSidebar"] label { color: #1A2B3C !important; }
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stTextInput label { color: #5A6B7D !important; }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #1A2B3C !important; }
+    /* Force light on all Streamlit native elements */
+    .stMarkdown, .stMarkdown p, .stMarkdown span, .stMarkdown li,
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+        color: #1A2B3C !important;
+    }
+    .stCaption, .stCaption p { color: #5A6B7D !important; }
+    /* Tabs */
+    [data-baseweb="tab-panel"] { background-color: #FFFFFF !important; }
+    [data-baseweb="tab"] { color: #5A6B7D !important; }
+    [data-baseweb="tab"][aria-selected="true"] { color: #0052CC !important; }
+    /* Buttons */
+    .stButton > button { color: #FFFFFF !important; }
+    .stDownloadButton > button { color: #FFFFFF !important; }
+    /* Text inputs / selectboxes */
+    [data-baseweb="input"] { background-color: #FFFFFF !important; color: #1A2B3C !important; }
+    [data-baseweb="input"] input { color: #1A2B3C !important; }
+    [data-baseweb="select"] { background-color: #FFFFFF !important; }
+    [data-baseweb="select"] > div { color: #1A2B3C !important; }
+    /* Expanders */
+    [data-testid="stExpander"] { background-color: #FFFFFF !important; border-color: #E9ECEF !important; }
+    [data-testid="stExpander"] summary { color: #1A2B3C !important; }
+    [data-testid="stExpander"] details div { color: #1A2B3C !important; }
+    /* Tables */
+    .stDataFrame, [data-testid="stTable"] { background-color: #FFFFFF !important; }
+    [data-testid="stTable"] td, [data-testid="stTable"] th { color: #1A2B3C !important; }
+    /* File uploader */
+    [data-testid="stFileUploader"] { background-color: #FFFFFF !important; }
+    [data-testid="stFileUploader"] label { color: #1A2B3C !important; }
+    /* Toggle */
+    [data-testid="stToggle"] label span { color: #1A2B3C !important; }
+    /* Alerts */
+    [data-testid="stAlert"] { color: #1A2B3C !important; }
+    /* Dividers */
+    hr { border-color: #DEE2E6 !important; }
+    /* Plotly chart containers */
+    [data-testid="stPlotlyChart"] { background-color: #FFFFFF !important; }
     .stApp { font-family:'Inter',system-ui,-apple-system,sans-serif; }
     /* Header */
     .main-header { background:#FFFFFF; padding:1.8rem 2.2rem; border-radius:12px; margin-bottom:1rem;
