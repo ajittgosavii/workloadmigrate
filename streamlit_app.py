@@ -12,9 +12,15 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import io, os, datetime, markdown as md_lib
+import io, os, datetime
 from openpyxl.styles import Font, PatternFill, Alignment
 from typing import Dict, List
+
+try:
+    import markdown as md_lib
+    HAS_MARKDOWN = True
+except ImportError:
+    HAS_MARKDOWN = False
 
 from pricing_engine import (
     calculate_all_outputs, AWS_REGIONS, AZURE_REGIONS,
@@ -25,7 +31,16 @@ from recommendation_engine import get_ai_recommendation, get_batch_ai_summary
 
 def render_ai_analysis(text: str, title: str = "Claude AI Analysis"):
     """Render AI markdown response as a beautifully formatted card."""
-    html_content = md_lib.markdown(text, extensions=["tables", "fenced_code", "nl2br"])
+    if HAS_MARKDOWN:
+        html_content = md_lib.markdown(text, extensions=["tables", "fenced_code", "nl2br"])
+    else:
+        # Fallback: basic conversion
+        import re
+        html_content = text
+        html_content = re.sub(r'^### (.+)$', r'<h5>\1</h5>', html_content, flags=re.MULTILINE)
+        html_content = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html_content)
+        html_content = re.sub(r'^- (.+)$', r'<li>\1</li>', html_content, flags=re.MULTILINE)
+        html_content = html_content.replace('\n\n', '<br><br>').replace('\n', '<br>')
     st.markdown(f'''<div class="ai-box">
         <h3>🤖 {title}</h3>
         <div class="ai-subtitle">AI-generated analysis — verify figures against computed data above</div>
