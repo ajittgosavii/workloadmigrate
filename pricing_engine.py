@@ -189,6 +189,161 @@ def _parse_azure_sku(sku: str) -> Tuple[int, float]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# LIVE PRICING — AWS Pricing API (requires boto3 + credentials)
+# ═══════════════════════════════════════════════════════════════════════════════
+# AWS credentials stored in session (never persisted). Set via sidebar or secrets.toml.
+_aws_credentials = {"access_key": None, "secret_key": None}
+
+
+def set_aws_credentials(access_key: str, secret_key: str):
+    """Set AWS credentials for live pricing lookups (session-only, never persisted)."""
+    _aws_credentials["access_key"] = access_key
+    _aws_credentials["secret_key"] = secret_key
+
+
+def _get_boto3_client(service: str, region: str = "us-east-1"):
+    """Create a boto3 client with session credentials. Returns None if unavailable."""
+    try:
+        import boto3
+        if _aws_credentials["access_key"] and _aws_credentials["secret_key"]:
+            return boto3.client(
+                service,
+                region_name=region,
+                aws_access_key_id=_aws_credentials["access_key"],
+                aws_secret_access_key=_aws_credentials["secret_key"],
+            )
+    except ImportError:
+        pass
+    return None
+
+
+# AWS region code → Pricing API location name mapping
+AWS_REGION_NAMES = {
+    "us-east-1": "US East (N. Virginia)", "us-east-2": "US East (Ohio)",
+    "us-west-2": "US West (Oregon)", "us-west-1": "US West (N. California)",
+    "ca-central-1": "Canada (Central)", "eu-west-1": "EU (Ireland)",
+    "eu-central-1": "EU (Frankfurt)", "eu-west-2": "EU (London)",
+    "ap-southeast-1": "Asia Pacific (Singapore)", "ap-southeast-2": "Asia Pacific (Sydney)",
+    "ap-northeast-1": "Asia Pacific (Tokyo)", "ap-south-1": "Asia Pacific (Mumbai)",
+}
+
+
+def fetch_aws_ec2_pricing(region_code: str, vcpu_needed: int, mem_needed: float,
+                          family: str = "general") -> List[Dict]:
+    """
+    Query AWS Pricing API for live EC2 on-demand pricing.
+    Requires boto3 + valid AWS credentials with pricing:GetProducts permission.
+    Falls back to empty list if unavailable.
+    """
+    # Check cache
+    cache_params = {"region": region_code, "vcpu": vcpu_needed, "mem": mem_needed, "family": family}
+    if HAS_CACHE:
+        cached, hit = pricing_cache.get("aws_ec2_pricing", cache_params)
+        if hit:
+            return cached
+
+    client = _get_boto3_client("pricing", "us-east-1")  # Pricing API only in us-east-1
+    if not client:
+        return []
+
+    location = AWS_REGION_NAMES.get(region_code, "US East (N. Virginia)")
+    # Map family to instance type prefix filters
+    family_prefixes = {
+        "general": ["m6i", "m7i", "t3"],
+        "compute": ["c6i", "c7i"],
+        "memory": ["r6i", "r7i"],
+        "database": ["m6i", "r6i"],
+    }
+    prefixes = family_prefixes.get(family, ["m6i", "t3"])
+
+    results = []
+    try:
+        import json as _json
+        for prefix in prefixes:
+            try:
+                response = client.get_products(
+                    ServiceCode='AmazonEC2',
+                    Filters=[
+                        {"Type": "TERM_MATCH", "Field": "location", "Value": location},
+                        {"Type": "TERM_MATCH", "Field": "operatingSystem", "Value": "Linux"},
+                        {"Type": "TERM_MATCH", "Field": "tenancy", "Value": "Shared"},
+                        {"Type": "TERM_MATCH", "Field": "capacitystatus", "Value": "Used"},
+                        {"Type": "TERM_MATCH", "Field": "preInstalledSw", "Value": "NA"},
+                        {"Type": "TERM_MATCH", "Field": "instanceType", "Value": f"{prefix}.*"},
+                    ],
+                    MaxResults=50,
+                )
+                for item_str in response.get("PriceList", []):
+                    item = _json.loads(item_str) if isinstance(item_str, str) else item_str
+                    product = item.get("product", {})
+                    attrs = product.get("attributes", {})
+                    inst_type = attrs.get("instanceType", "")
+                    if not inst_type or not inst_type.startswith(prefix):
+                        continue
+                    vcpu = int(attrs.get("vcpu", "0").replace(",", ""))
+                    mem_str = attrs.get("memory", "0 GiB").split(" ")[0].replace(",", "")
+                    try:
+                        mem = float(mem_str)
+                    except ValueError:
+                        continue
+                    if vcpu < vcpu_needed or mem < mem_needed:
+                        continue
+                    # Extract on-demand price
+                    terms = item.get("terms", {}).get("OnDemand", {})
+                    for term_key, term_val in terms.items():
+                        for dim_key, dim_val in term_val.get("priceDimensions", {}).items():
+                            price_str = dim_val.get("pricePerUnit", {}).get("USD", "0")
+                            try:
+                                price = float(price_str)
+                            except ValueError:
+                                continue
+                            if price > 0:
+                                results.append({
+                                    "type": inst_type, "vcpu": vcpu, "memory": mem,
+                                    "price_hr": price, "source": "aws_api_live",
+                                })
+            except Exception:
+                continue
+    except Exception:
+        return []
+
+    # Deduplicate — keep cheapest per instance type
+    seen = {}
+    for r in results:
+        if r["type"] not in seen or r["price_hr"] < seen[r["type"]]["price_hr"]:
+            seen[r["type"]] = r
+    sorted_results = sorted(seen.values(), key=lambda x: (x["vcpu"], x["memory"], x["price_hr"]))
+
+    if sorted_results and HAS_CACHE:
+        pricing_cache.put("aws_ec2_pricing", cache_params, sorted_results, ttl=1800)
+
+    return sorted_results
+
+
+def check_aws_live_connectivity() -> Tuple[bool, str]:
+    """Check AWS Pricing API connectivity with current credentials."""
+    client = _get_boto3_client("pricing", "us-east-1")
+    if not client:
+        ak = _aws_credentials.get("access_key")
+        if not ak:
+            return False, "No AWS credentials configured"
+        return False, "boto3 not installed (pip install boto3)"
+    try:
+        response = client.describe_services(ServiceCode='AmazonEC2', MaxResults=1)
+        services = response.get("Services", [])
+        if services:
+            return True, f"AWS Pricing API connected (Live EC2 pricing)"
+        return False, "API responded but no services found"
+    except Exception as e:
+        err = str(e)
+        if "InvalidClientTokenId" in err or "SignatureDoesNotMatch" in err:
+            return False, "Invalid AWS credentials"
+        if "AccessDenied" in err:
+            return False, "Access denied — need pricing:GetProducts permission"
+        return False, err[:80]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # DYNAMIC REFERENCE CATALOG — Fallback ONLY when live APIs fail
 # ═══════════════════════════════════════════════════════════════════════════════
 def _get_reference_catalog(cloud: str, family: str) -> List[Dict]:
@@ -530,12 +685,17 @@ def _match(candidates: List[Dict], vcpu: int, mem: float) -> Dict:
 # API CONNECTIVITY CHECKS
 # ═══════════════════════════════════════════════════════════════════════════════
 def check_aws_connectivity() -> Tuple[bool, str]:
-    """Check AWS pricing API connectivity (uses public reference catalog, no auth needed)."""
+    """Check AWS pricing API connectivity — live if credentials available, else reference catalog."""
+    # Try live API first
+    live_ok, live_msg = check_aws_live_connectivity()
+    if live_ok:
+        return True, live_msg
+    # Fall back to reference catalog
     try:
-        # AWS pricing is via reference catalog — always available
         cat = _get_reference_catalog("AWS", "general")
         if cat and len(cat) > 0:
-            return True, f"Reference catalog: {len(cat)} instance types loaded"
+            suffix = f" ({live_msg})" if _aws_credentials.get("access_key") else ""
+            return True, f"Reference catalog: {len(cat)} instance types{suffix}"
         return False, "Reference catalog empty"
     except Exception as e:
         return False, str(e)
@@ -703,18 +863,26 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
     rmult = _region_mult(pricing_cloud, region)
     MH = 730  # monthly hours
 
-    # Live pricing attempt
+    # Live pricing attempt — try API first, then fall back to reference catalog
     pricing_source = "reference_catalog"
     live_inst = []
     if pricing_cloud == "Azure":
         rcode = AZURE_REGIONS.get(region, "eastus")
         live_inst = fetch_azure_vm_pricing(rcode, rs_cpu, rs_mem)
         if live_inst: pricing_source = "azure_api_live"
+    elif pricing_cloud == "AWS":
+        aws_rcode = AWS_REGIONS.get(region, "us-east-1")
+        live_inst = fetch_aws_ec2_pricing(aws_rcode, rs_cpu, rs_mem, family)
+        if live_inst: pricing_source = "aws_api_live"
 
     if live_inst:
         rec = _match(live_inst, rs_cpu, rs_mem)
         rec_hr = rec["price_hr"]
-        cur_live = fetch_azure_vm_pricing(AZURE_REGIONS.get(region, "eastus"), vcpu_count, memory_gb)
+        # Also fetch current-size pricing from live API
+        if pricing_cloud == "Azure":
+            cur_live = fetch_azure_vm_pricing(AZURE_REGIONS.get(region, "eastus"), vcpu_count, memory_gb)
+        else:
+            cur_live = fetch_aws_ec2_pricing(AWS_REGIONS.get(region, "us-east-1"), vcpu_count, memory_gb, family)
         if cur_live:
             cur = _match(cur_live, vcpu_count, memory_gb)
             cur_hr = cur["price_hr"]
@@ -768,9 +936,20 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
     xp = {}
     for xcloud in ["AWS", "Azure"]:
         xrmult = _region_mult(xcloud, region)
-        xcat = _get_reference_catalog(xcloud, family)
-        xrec = _match(xcat, rs_cpu, rs_mem)
-        xrec_hr = xrec["base_price_hr"] * xrmult
+        x_source = "reference_catalog"
+        # Try live pricing for cross-provider comparison
+        if xcloud == "AWS":
+            x_live = fetch_aws_ec2_pricing(AWS_REGIONS.get(region, "us-east-1"), rs_cpu, rs_mem, family)
+        else:
+            x_live = fetch_azure_vm_pricing(AZURE_REGIONS.get(region, "eastus"), rs_cpu, rs_mem)
+        if x_live:
+            xrec = _match(x_live, rs_cpu, rs_mem)
+            xrec_hr = xrec["price_hr"]
+            x_source = f"{xcloud.lower()}_api_live"
+        else:
+            xcat = _get_reference_catalog(xcloud, family)
+            xrec = _match(xcat, rs_cpu, rs_mem)
+            xrec_hr = xrec["base_price_hr"] * xrmult
         xrec_od = round(xrec_hr * MH, 2)
         xrec_3y = round(xrec_od * 0.40, 2)
         xrec_lic = compute_licensing(os_name, xrec["vcpu"])

@@ -25,6 +25,7 @@ except ImportError:
 from pricing_engine import (
     calculate_all_outputs, AWS_REGIONS, AZURE_REGIONS,
     check_aws_connectivity, check_azure_connectivity, check_anthropic_connectivity,
+    set_aws_credentials,
 )
 from recommendation_engine import get_ai_recommendation, get_batch_ai_summary
 
@@ -117,8 +118,8 @@ def render_ai_analysis(text: str, title: str = "Claude AI Analysis"):
         html_content = re.sub(r'^- (.+)$', r'<li>\1</li>', html_content, flags=re.MULTILINE)
         html_content = html_content.replace('\n\n', '<br><br>').replace('\n', '<br>')
     st.markdown(f'''<div class="ai-box">
-        <h3>🤖 {title}</h3>
-        <div class="ai-subtitle">AI-generated analysis — verify figures against computed data above</div>
+        <h4 style="margin:0 0 .3rem 0;">AI Analysis &mdash; {title}</h4>
+        <div class="ai-subtitle">AI-generated analysis &mdash; verify figures against computed data above</div>
         {html_content}
     </div>''', unsafe_allow_html=True)
 
@@ -129,92 +130,124 @@ st.set_page_config(page_title="Cloud Migration Analyzer", page_icon="☁️",
 # ─── Custom CSS ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    :root { --accent:#00D4AA; --surface:#1A1F2E; --surface2:#232839; --danger:#FF6B6B; --warn:#FFD93D; --info:#6C9FFF; }
-    .stApp { font-family:'DM Sans',sans-serif; }
-    .main-header { background:linear-gradient(135deg,#0f2027,#203a43 50%,#2c5364); padding:2rem 2.5rem;
-        border-radius:16px; margin-bottom:1rem; border:1px solid rgba(0,212,170,0.2); position:relative; overflow:hidden; }
-    .main-header::before { content:''; position:absolute; top:-50%; right:-20%; width:300px; height:300px;
-        background:radial-gradient(circle,rgba(0,212,170,0.08),transparent 70%); border-radius:50%; }
-    .main-header h1 { font-size:2rem; font-weight:700; color:#FFF; margin:0 0 .3rem 0; }
-    .main-header p { color:#94A3B8; font-size:1rem; margin:0; }
-    .compliance-banner { background:linear-gradient(90deg,#1e293b,#0f172a); border:1px solid rgba(255,217,61,0.3);
-        border-radius:10px; padding:0.8rem 1.2rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.8rem; }
-    .compliance-banner .icon { font-size:1.4rem; }
-    .compliance-banner .text { color:#FFD93D; font-size:0.85rem; font-weight:500; }
-    .metric-card { background:var(--surface); padding:1.2rem 1.5rem; border-radius:12px;
-        border-left:4px solid var(--accent); margin-bottom:0.8rem; }
-    .metric-card .label { color:#94A3B8; font-size:0.78rem; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; }
-    .metric-card .value { color:#FFF; font-size:1.5rem; font-weight:700; font-family:'JetBrains Mono',monospace; }
-    .metric-card .sub { color:var(--accent); font-size:0.83rem; margin-top:2px; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+    :root {
+        --primary:#0052CC; --primary-light:#E6F0FF; --primary-dark:#003D99;
+        --accent:#0052CC; --surface:#FFFFFF; --surface2:#F4F6F9; --surface3:#EDF0F5;
+        --danger:#DC3545; --warn:#D97706; --success:#0A8754; --info:#0052CC;
+        --text:#1A2B3C; --text-secondary:#5A6B7D; --text-muted:#8896A6;
+        --border:#DEE2E6; --border-light:#E9ECEF;
+    }
+    .stApp { font-family:'Inter',system-ui,-apple-system,sans-serif; }
+    /* Header */
+    .main-header { background:#FFFFFF; padding:1.8rem 2.2rem; border-radius:12px; margin-bottom:1rem;
+        border:1px solid var(--border); border-bottom:3px solid var(--primary); }
+    .main-header h1 { font-size:1.75rem; font-weight:700; color:var(--text); margin:0 0 .25rem 0; letter-spacing:-0.3px; }
+    .main-header p { color:var(--text-secondary); font-size:0.92rem; margin:0; }
+    /* Compliance banner */
+    .compliance-banner { background:var(--primary-light); border:1px solid #B3D4FF;
+        border-radius:8px; padding:0.7rem 1.2rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.8rem; }
+    .compliance-banner .icon { font-size:1.2rem; }
+    .compliance-banner .text { color:var(--primary-dark); font-size:0.82rem; font-weight:500; }
+    /* Metric cards */
+    .metric-card { background:#FFFFFF; padding:1.1rem 1.4rem; border-radius:10px;
+        border:1px solid var(--border-light); border-left:4px solid var(--primary); margin-bottom:0.7rem;
+        box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+    .metric-card .label { color:var(--text-muted); font-size:0.72rem; text-transform:uppercase;
+        letter-spacing:0.8px; font-weight:600; margin-bottom:4px; }
+    .metric-card .value { color:var(--text); font-size:1.4rem; font-weight:700;
+        font-family:'IBM Plex Mono',monospace; }
+    .metric-card .sub { color:var(--primary); font-size:0.8rem; margin-top:2px; font-weight:500; }
     .metric-red { border-left-color:var(--danger)!important; }
+    .metric-red .sub { color:var(--danger); }
     .metric-blue { border-left-color:var(--info)!important; }
+    .metric-blue .sub { color:var(--info); }
     .metric-yellow { border-left-color:var(--warn)!important; }
-    .section-header { font-size:0.88rem; font-weight:700; color:var(--accent); padding-bottom:0.5rem;
-        border-bottom:2px solid var(--surface); margin:1.5rem 0 1rem 0; text-transform:uppercase; letter-spacing:1.5px; }
-    .output-table { background:var(--surface); border-radius:12px; overflow:hidden; margin-bottom:1rem; }
+    .metric-yellow .sub { color:var(--warn); }
+    /* Section headers */
+    .section-header { font-size:0.82rem; font-weight:700; color:var(--primary); padding-bottom:0.5rem;
+        border-bottom:2px solid var(--border-light); margin:1.5rem 0 1rem 0; text-transform:uppercase; letter-spacing:1.2px; }
+    /* Output tables */
+    .output-table { background:#FFFFFF; border-radius:10px; overflow:hidden; margin-bottom:1rem;
+        border:1px solid var(--border-light); }
     .output-table table { width:100%; border-collapse:collapse; }
-    .output-table th { background:var(--surface2); color:var(--accent); padding:.7rem 1rem;
-        text-align:left; font-size:.73rem; text-transform:uppercase; letter-spacing:1px; }
-    .output-table td { padding:.6rem 1rem; color:#E0E0E0; border-bottom:1px solid rgba(255,255,255,0.05);
-        font-family:'JetBrains Mono',monospace; font-size:.88rem; }
+    .output-table th { background:var(--surface2); color:var(--primary); padding:.65rem 1rem;
+        text-align:left; font-size:.72rem; text-transform:uppercase; letter-spacing:0.8px; font-weight:600; }
+    .output-table td { padding:.55rem 1rem; color:var(--text); border-bottom:1px solid var(--border-light);
+        font-family:'IBM Plex Mono',monospace; font-size:.85rem; }
     .output-table tr:last-child td { border-bottom:none; }
-    .ai-box { background:linear-gradient(135deg,#0d1b2a,#1b2838,#162032); border:1px solid rgba(0,212,170,0.4);
-        border-radius:14px; padding:2rem 2.2rem; margin:1.2rem 0; box-shadow:0 4px 24px rgba(0,212,170,0.08); }
-    .ai-box h3 { color:var(--accent); margin:0 0 .4rem 0; font-size:1.3rem; }
-    .ai-box .ai-subtitle { color:rgba(255,255,255,0.5); font-size:.82rem; margin-bottom:1.2rem; }
-    .ai-box h4, .ai-box h5 { color:#6C9FFF; margin:1.4rem 0 .5rem 0; border-bottom:1px solid rgba(108,159,255,0.2); padding-bottom:.3rem; }
-    .ai-box p { color:rgba(255,255,255,0.88); line-height:1.65; margin:0.4rem 0; }
-    .ai-box ul, .ai-box ol { color:rgba(255,255,255,0.88); padding-left:1.4rem; }
+    .output-table tr:hover td { background:var(--surface2); }
+    /* AI analysis box */
+    .ai-box { background:#FFFFFF; border:1px solid var(--border); border-left:4px solid var(--primary);
+        border-radius:10px; padding:1.8rem 2rem; margin:1.2rem 0; box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+    .ai-box h4 { color:var(--primary); margin:0 0 .3rem 0; font-size:1.1rem; }
+    .ai-box .ai-subtitle { color:var(--text-muted); font-size:.8rem; margin-bottom:1rem;
+        padding-bottom:.6rem; border-bottom:1px solid var(--border-light); }
+    .ai-box h5 { color:var(--primary-dark); margin:1.2rem 0 .4rem 0;
+        border-bottom:1px solid var(--border-light); padding-bottom:.3rem; font-size:.95rem; }
+    .ai-box p { color:var(--text); line-height:1.65; margin:0.4rem 0; }
+    .ai-box ul, .ai-box ol { color:var(--text); padding-left:1.4rem; }
     .ai-box li { margin:0.3rem 0; line-height:1.55; }
-    .ai-box strong { color:#FFD93D; }
-    .ai-box code { background:rgba(0,212,170,0.1); color:var(--accent); padding:1px 5px; border-radius:3px; font-size:.85rem; }
+    .ai-box strong { color:var(--primary-dark); }
+    .ai-box code { background:var(--primary-light); color:var(--primary); padding:1px 5px; border-radius:3px; font-size:.85rem; }
     .ai-box table { width:100%; border-collapse:collapse; margin:.6rem 0; }
-    .ai-box table th { background:rgba(108,159,255,0.15); color:#6C9FFF; padding:.5rem .8rem; text-align:left;
-        border-bottom:1px solid rgba(108,159,255,0.3); font-size:.82rem; }
-    .ai-box table td { padding:.4rem .8rem; border-bottom:1px solid rgba(255,255,255,0.06); color:rgba(255,255,255,0.85);
+    .ai-box table th { background:var(--surface2); color:var(--primary); padding:.5rem .8rem; text-align:left;
+        border-bottom:2px solid var(--border); font-size:.78rem; font-weight:600; }
+    .ai-box table td { padding:.4rem .8rem; border-bottom:1px solid var(--border-light); color:var(--text);
         font-size:.82rem; }
-    .ai-box table tr:hover td { background:rgba(255,255,255,0.03); }
-    .ai-box hr { border:none; border-top:1px solid rgba(255,255,255,0.08); margin:1rem 0; }
+    .ai-box table tr:hover td { background:var(--surface2); }
+    .ai-box hr { border:none; border-top:1px solid var(--border-light); margin:1rem 0; }
+    /* Badges */
     .badge { display:inline-block; padding:.2rem .6rem; border-radius:20px; font-size:.73rem; font-weight:600; }
-    .badge-live { background:rgba(0,212,170,0.15); color:var(--accent); }
-    .badge-ref { background:rgba(108,159,255,0.15); color:var(--info); }
-    .server-card { background:var(--surface); border-radius:10px; padding:1rem 1.2rem; margin:.6rem 0;
-        border-left:3px solid var(--accent); }
-    .server-card .sname { color:#FFF; font-weight:700; font-size:1rem; }
-    .server-card .sdetail { color:#94A3B8; font-size:.82rem; margin-top:4px; }
-    .cost-breakdown { background:var(--surface2); border-radius:8px; padding:1rem 1.2rem; margin:.5rem 0; font-size:.85rem; }
-    .cost-breakdown .cb-row { display:flex; justify-content:space-between; padding:3px 0; color:#CBD5E1; }
-    .cost-breakdown .cb-total { border-top:1px solid rgba(255,255,255,0.15); margin-top:6px; padding-top:6px;
-        font-weight:700; color:#FFF; }
+    .badge-live { background:#E6F9F1; color:var(--success); border:1px solid #B3E8D0; }
+    .badge-ref { background:var(--primary-light); color:var(--primary); border:1px solid #B3D4FF; }
+    /* Server card */
+    .server-card { background:#FFFFFF; border-radius:10px; padding:1rem 1.2rem; margin:.6rem 0;
+        border:1px solid var(--border-light); border-left:3px solid var(--primary); }
+    .server-card .sname { color:var(--text); font-weight:700; font-size:1rem; }
+    .server-card .sdetail { color:var(--text-secondary); font-size:.82rem; margin-top:4px; }
+    /* Cost breakdown */
+    .cost-breakdown { background:var(--surface2); border-radius:8px; padding:1rem 1.2rem; margin:.5rem 0;
+        font-size:.85rem; border:1px solid var(--border-light); }
+    .cost-breakdown .cb-row { display:flex; justify-content:space-between; padding:3px 0; color:var(--text-secondary); }
+    .cost-breakdown .cb-total { border-top:2px solid var(--border); margin-top:6px; padding-top:6px;
+        font-weight:700; color:var(--text); }
+    /* Connectivity indicators */
     .conn-indicator { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:8px;
         margin:4px 0; font-size:.82rem; }
-    .conn-ok { background:rgba(0,212,170,0.1); border:1px solid rgba(0,212,170,0.3); color:#00D4AA; }
-    .conn-err { background:rgba(255,107,107,0.1); border:1px solid rgba(255,107,107,0.3); color:#FF6B6B; }
-    .conn-warn { background:rgba(255,217,61,0.1); border:1px solid rgba(255,217,61,0.3); color:#FFD93D; }
+    .conn-ok { background:#E6F9F1; border:1px solid #B3E8D0; color:var(--success); }
+    .conn-err { background:#FDE8E8; border:1px solid #F5B7B7; color:var(--danger); }
+    .conn-warn { background:#FEF3CD; border:1px solid #F5DFA0; color:var(--warn); }
     .conn-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
-    .conn-dot-ok { background:#00D4AA; box-shadow:0 0 6px #00D4AA; }
-    .conn-dot-err { background:#FF6B6B; }
-    .conn-dot-warn { background:#FFD93D; }
+    .conn-dot-ok { background:var(--success); }
+    .conn-dot-err { background:var(--danger); }
+    .conn-dot-warn { background:var(--warn); }
     .source-tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:.72rem;
-        background:rgba(108,159,255,0.1); color:#6C9FFF; border:1px solid rgba(108,159,255,0.2); margin:2px 0; }
-    .method-box { background:var(--surface); border-radius:10px; padding:1.2rem; margin:.8rem 0;
-        border:1px solid rgba(255,255,255,0.08); font-size:.85rem; }
+        background:var(--primary-light); color:var(--primary); border:1px solid #B3D4FF; margin:2px 0; }
+    .method-box { background:#FFFFFF; border-radius:10px; padding:1.2rem; margin:.8rem 0;
+        border:1px solid var(--border-light); font-size:.85rem; }
+    /* Streamlit overrides for enterprise look */
+    .stTabs [data-baseweb="tab-list"] { gap:0; border-bottom:2px solid var(--border-light); }
+    .stTabs [data-baseweb="tab"] { font-weight:600; font-size:.85rem; letter-spacing:0.2px;
+        padding:0.7rem 1.4rem; color:var(--text-secondary); }
+    .stTabs [aria-selected="true"] { color:var(--primary); border-bottom:3px solid var(--primary); }
+    div[data-testid="stExpander"] { border:1px solid var(--border-light); border-radius:8px; }
+    div[data-testid="stExpander"] summary { font-weight:600; color:var(--text); }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class="main-header">
-    <h1>☁️ Cloud Migration Cost Analyzer</h1>
-    <p>Enterprise Right-Sizing • Real-Time Pricing • AI Recommendations — AWS, Azure & Azure Local</p>
+    <h1>Cloud Migration Cost Analyzer</h1>
+    <p>Enterprise Right-Sizing &bull; Real-Time Pricing &bull; AI Recommendations &mdash; AWS, Azure &amp; Azure Local</p>
 </div>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class="compliance-banner">
-    <div class="icon">🔒</div>
-    <div class="text">COMPLIANCE MODE: Zero data persistence — All data computed in-memory,
-    never stored. Session discarded on close. Export generates fresh Excel/CSV on-the-fly.</div>
+    <div class="icon">&#x1F512;</div>
+    <div class="text">COMPLIANCE MODE &mdash; Zero data persistence. All data computed in-memory,
+    never stored. Session discarded on close. Export generates fresh files on-the-fly.</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -317,9 +350,9 @@ Azure Local Annual = On-Prem HW & Ops (excl. OS licensing)
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### ⚙️ Configuration")
+    st.markdown("### Configuration")
     st.markdown("---")
-    st.markdown("**🤖 Claude AI**")
+    st.markdown("**Claude AI**")
     _secrets_key = ""
     try:
         _secrets_key = st.secrets.get("ANTHROPIC_API_KEY", "")
@@ -329,12 +362,42 @@ with st.sidebar:
         _secrets_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if _secrets_key:
         api_key = _secrets_key
-        st.success("🔑 API key loaded from secrets", icon="✅")
+        st.success("API key loaded from secrets", icon="✅")
     else:
         api_key = st.text_input("Anthropic API Key", type="password",
                                 help="Or add ANTHROPIC_API_KEY to .streamlit/secrets.toml")
         if not api_key:
-            st.caption("💡 Add to `secrets.toml` for auto-load")
+            st.caption("Add to `secrets.toml` for auto-load")
+
+    st.markdown("---")
+    st.markdown("**AWS Pricing API**")
+    _aws_access = ""
+    _aws_secret = ""
+    try:
+        _aws_access = st.secrets.get("AWS_ACCESS_KEY_ID", "")
+        _aws_secret = st.secrets.get("AWS_SECRET_ACCESS_KEY", "")
+    except Exception:
+        pass
+    if not _aws_access:
+        _aws_access = os.environ.get("AWS_ACCESS_KEY_ID", "")
+    if not _aws_secret:
+        _aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+    if _aws_access and _aws_secret:
+        aws_access_key = _aws_access
+        aws_secret_key = _aws_secret
+        st.success("AWS credentials loaded", icon="✅")
+    else:
+        aws_access_key = st.text_input("AWS Access Key ID", type="password",
+                                       help="For live EC2/RDS pricing. Add to secrets.toml for auto-load")
+        aws_secret_key = st.text_input("AWS Secret Access Key", type="password",
+                                       help="Required for AWS Pricing API")
+        if not aws_access_key:
+            st.caption("Optional — uses reference catalog without keys")
+
+    # Wire credentials into pricing engine (session-only, never persisted)
+    if aws_access_key and aws_secret_key:
+        set_aws_credentials(aws_access_key, aws_secret_key)
+
     st.markdown("---")
     st.markdown("**📊 Display**")
     show_charts = st.toggle("Show Charts", value=True)
@@ -363,25 +426,39 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**🔌 API Connections**")
 
-    # Check connections (cached per session)
-    if "_conn_checked" not in st.session_state:
+    # Re-check when credentials change (track previous state)
+    _curr_aws_key = aws_access_key[:8] if aws_access_key else ""
+    _needs_recheck = (
+        "_conn_checked" not in st.session_state
+        or st.session_state.get("_prev_aws_key", "") != _curr_aws_key
+        or st.session_state.get("_prev_api_key", "") != (api_key[:8] if api_key else "")
+    )
+    if _needs_recheck:
         st.session_state["_conn_aws"] = check_aws_connectivity()
         st.session_state["_conn_azure"] = check_azure_connectivity()
         st.session_state["_conn_anthropic"] = check_anthropic_connectivity(api_key)
+        st.session_state["_prev_aws_key"] = _curr_aws_key
+        st.session_state["_prev_api_key"] = api_key[:8] if api_key else ""
         st.session_state["_conn_checked"] = True
 
     aws_ok, aws_msg = st.session_state["_conn_aws"]
     az_ok, az_msg = st.session_state["_conn_azure"]
     anth_ok, anth_msg = st.session_state["_conn_anthropic"]
 
-    def conn_html(name, ok, msg, icon):
+    def conn_html(name, ok, msg, icon, badge_text=""):
         cls = "conn-ok" if ok else "conn-err"
         dot = "conn-dot-ok" if ok else "conn-dot-err"
         status = "Connected" if ok else "Offline"
-        return f'<div class="conn-indicator {cls}"><span class="conn-dot {dot}"></span><strong>{icon} {name}</strong> — {status}</div>'
+        badge = f' <span class="badge {"badge-live" if "Live" in badge_text else "badge-ref"}">{badge_text}</span>' if badge_text else ""
+        return f'<div class="conn-indicator {cls}"><span class="conn-dot {dot}"></span><strong>{icon} {name}</strong> — {status}{badge}</div>'
 
-    st.markdown(conn_html("AWS", aws_ok, aws_msg, "🟠"), unsafe_allow_html=True)
-    st.markdown(conn_html("Azure", az_ok, az_msg, "🔵"), unsafe_allow_html=True)
+    # AWS badge shows Live API vs Reference Catalog
+    aws_badge = ""
+    if aws_ok:
+        aws_badge = "Live API" if "live" in aws_msg.lower() or "boto3" in aws_msg.lower() else "Reference"
+
+    st.markdown(conn_html("AWS", aws_ok, aws_msg, "🟠", aws_badge), unsafe_allow_html=True)
+    st.markdown(conn_html("Azure", az_ok, az_msg, "🔵", "Live API" if az_ok else ""), unsafe_allow_html=True)
     st.markdown(conn_html("Azure Local", az_ok, "Uses Azure API" if az_ok else az_msg, "🔷"), unsafe_allow_html=True)
     st.markdown(conn_html("Anthropic", anth_ok, anth_msg, "🟣"), unsafe_allow_html=True)
 
@@ -392,9 +469,7 @@ with st.sidebar:
         st.caption(f"**Anthropic:** {anth_msg}")
 
     if st.button("🔄 Refresh Connections", use_container_width=True, key="refresh_conn"):
-        st.session_state["_conn_aws"] = check_aws_connectivity()
-        st.session_state["_conn_azure"] = check_azure_connectivity()
-        st.session_state["_conn_anthropic"] = check_anthropic_connectivity(api_key)
+        st.session_state.pop("_conn_checked", None)
         st.rerun()
     if st.button("🗑️ Clear Session Now", use_container_width=True):
         for k in list(st.session_state.keys()):
@@ -571,7 +646,7 @@ def render_server_card(inp: Dict, out: Dict, idx: int):
         azl = out.get("azure_local", {})
         if azl:
             st.markdown(f"""<div class="cost-breakdown">
-                <strong style="color:#9B59B6;">🔷 Azure Local (Hybrid) — 3 Scenarios</strong>
+                <strong style="color:var(--primary);">Azure Local (Hybrid) — 3 Scenarios</strong>
                 <div class="cb-row"><span>🐧 Linux (Host $10/core/mo × {int(float(inp.get('vcpu_count',0)))})</span><span>${azl.get('linux_total_annual',0):,.2f}/yr</span></div>
                 <div class="cb-row"><span>🪟 Windows (Host+WS $23.30/core/mo × {int(float(inp.get('vcpu_count',0)))})</span><span>${azl.get('windows_total_annual',0):,.2f}/yr</span></div>
                 <div class="cb-row"><span>💎 Azure Hybrid Benefit (SA waiver)</span><span>${azl.get('ahb_total_annual',0):,.2f}/yr</span></div>
@@ -813,20 +888,20 @@ def render_single_output(inputs: Dict, outputs: Dict):
             st.markdown(f"""<div class="cost-breakdown">
                 <strong style="color:var(--accent);">📊 Annual TCO Breakdown — Industry-Sourced Rates</strong>
                 <div class="cb-row"><span>🖥️ Hardware Compute ({int(float(inputs.get('vcpu_count',0)))} vCPU × $130/yr amortized)</span><span>${bk['hw_compute']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#6C9FFF;">↳ {sources.get('compute','Dell PowerEdge R760, 5-yr lifecycle')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('compute','Dell PowerEdge R760, 5-yr lifecycle')}</div>
                 <div class="cb-row"><span>🧠 Hardware Memory ({float(inputs.get('memory_gb',0))} GB × $10/yr amortized)</span><span>${bk['hw_memory']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#6C9FFF;">↳ {sources.get('memory','DDR5 RDIMM enterprise pricing')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('memory','DDR5 RDIMM enterprise pricing')}</div>
                 <div class="cb-row"><span>💾 Hardware Storage ({float(inputs.get('total_storage_gb',0))} GB × $0.08/yr blended SSD/HDD)</span><span>${bk['hw_storage']:,.2f}</span></div>
-                <div class="cb-row" style="font-weight:600; border-top:1px solid rgba(255,255,255,0.1); padding-top:4px;">
+                <div class="cb-row" style="font-weight:600; border-top:1px solid var(--border); padding-top:4px; color:var(--text);">
                     <span>Hardware Subtotal</span><span>${bk['hw_total']:,.2f}</span></div>
                 <div class="cb-row"><span>⚡ Power & Cooling ({bk.get('server_watts',0):.0f}W × PUE {bk.get('pue',1.55)} × {bk.get('power_kwh_yr',0):,.0f} kWh/yr × ${bk.get('electricity_rate',0.12)}/kWh)</span><span>${bk['power_cooling']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#6C9FFF;">↳ {sources.get('power','US DOE 2024 Report, EIA')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('power','US DOE 2024 Report, EIA')}</div>
                 <div class="cb-row"><span>🏢 Facility / Colocation Rack Share</span><span>${bk['facility']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#6C9FFF;">↳ {sources.get('facility','ENCOR Advisors, Brightlio 2025')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('facility','ENCOR Advisors, Brightlio 2025')}</div>
                 <div class="cb-row"><span>👷 Admin & Labor Overhead (SysAdmin allocation)</span><span>${bk['admin_labor']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#6C9FFF;">↳ {sources.get('labor','Gartner benchmarks, Sherweb TCO')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('labor','Gartner benchmarks, Sherweb TCO')}</div>
                 <div class="cb-row"><span>📜 OS Licensing ({bk.get('licensing_name','Linux')})</span><span>${bk['annual_licensing']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#6C9FFF;">↳ {sources.get('licensing','Dell configurator pricing')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('licensing','Dell configurator pricing')}</div>
                 <div class="cb-row cb-total"><span>On-Prem Yearly Cost</span><span>${outputs['on_prem_yearly_cost']:,.2f}</span></div>
             </div>""", unsafe_allow_html=True)
     with t2:
@@ -859,26 +934,26 @@ def render_single_output(inputs: Dict, outputs: Dict):
             cats = ["On-Demand", "1-Year RI", "3-Year RI"]
             fig.add_trace(go.Bar(name="Current IaaS", x=cats,
                 y=[outputs['iaas_on_demand_price']*cmult, outputs['iaas_reserved_1yr_price']*cmult, outputs['iaas_reserved_3yr_price']*cmult],
-                marker_color="#FF6B6B"))
+                marker_color="#DC3545"))
             fig.add_trace(go.Bar(name="Right-Sized IaaS", x=cats,
                 y=[outputs['iaas_rec_on_demand']*cmult, outputs['iaas_rec_reserved_1yr']*cmult, outputs['iaas_rec_reserved_3yr']*cmult],
-                marker_color="#00D4AA"))
+                marker_color="#0A8754"))
             fig.add_trace(go.Bar(name="PaaS", x=cats,
                 y=[outputs['paas_on_demand']*cmult, outputs['paas_reserved_1yr']*cmult, outputs['paas_reserved_3yr']*cmult],
-                marker_color="#6C9FFF"))
-            fig.update_layout(title="Monthly Cost Comparison", barmode="group", template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=420)
+                marker_color="#0052CC"))
+            fig.update_layout(title="Monthly Cost Comparison", barmode="group", template="plotly_white",
+                paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC", height=420)
             st.plotly_chart(fig, use_container_width=True)
         with ch2:
             fig_g = make_subplots(rows=1, cols=3, specs=[[{"type":"indicator"}]*3],
                                   subplot_titles=["CPU", "Memory", "Storage"])
-            for i, (v, col) in enumerate([(float(inputs['avg_cpu_usage']), "#00D4AA"),
-                                           (float(inputs['avg_memory_usage']), "#6C9FFF"),
-                                           (float(inputs['storage_usage_pct']), "#FFD93D")]):
+            for i, (v, col) in enumerate([(float(inputs['avg_cpu_usage']), "#0A8754"),
+                                           (float(inputs['avg_memory_usage']), "#0052CC"),
+                                           (float(inputs['storage_usage_pct']), "#D97706")]):
                 fig_g.add_trace(go.Indicator(mode="gauge+number", value=v,
-                    gauge=dict(axis=dict(range=[0,100]), bar=dict(color=col), bgcolor="rgba(255,255,255,0.05)"),
+                    gauge=dict(axis=dict(range=[0,100]), bar=dict(color=col), bgcolor="#F4F6F9"),
                     number=dict(suffix="%")), row=1, col=i+1)
-            fig_g.update_layout(template="plotly_dark", height=350, paper_bgcolor="rgba(0,0,0,0)")
+            fig_g.update_layout(template="plotly_white", height=350, paper_bgcolor="#FFFFFF")
             st.plotly_chart(fig_g, use_container_width=True)
 
     # ── ENHANCED ANALYSIS SECTIONS ────────────────────────────────────────
@@ -1203,8 +1278,9 @@ with tab_manual:
 
         if show_ai and api_key:
             st.markdown('<div class="section-header">🤖 AI Migration Analysis</div>', unsafe_allow_html=True)
-            if st.button("🧠 Generate Deep AI Analysis", type="primary", key="ai_m"):
-                with st.spinner("Claude analyzing server profile, cross-provider costs, risks, and migration strategy…"):
+            st.caption("AI analyzes sizing, PaaS vs IaaS, cost optimization, migration gaps, and risk assessment")
+            if st.button("🧠 Generate AI Analysis (Sizing + PaaS/IaaS + Gaps)", type="primary", key="ai_m"):
+                with st.spinner("Claude analyzing sizing, PaaS/IaaS fit, cost optimization, gaps, and migration strategy…"):
                     rec = get_ai_recommendation(inp, out, api_key)
                 render_ai_analysis(rec, "Server Migration Analysis")
         elif show_ai and not api_key:
@@ -1429,24 +1505,24 @@ with tab_results:
                     f"Azure ({csym}/yr)": "sum"}).reset_index()
                 fig_env = go.Figure()
                 fig_env.add_trace(go.Bar(name="On-Prem", x=env_costs["Environment"],
-                    y=env_costs[f"On-Prem ({csym}/yr)"], marker_color="#FF6B6B"))
+                    y=env_costs[f"On-Prem ({csym}/yr)"], marker_color="#DC3545"))
                 fig_env.add_trace(go.Bar(name="AWS (3yr RI)", x=env_costs["Environment"],
-                    y=env_costs[f"AWS ({csym}/yr)"], marker_color="#FF9900"))
+                    y=env_costs[f"AWS ({csym}/yr)"], marker_color="#E8850C"))
                 fig_env.add_trace(go.Bar(name="Azure (3yr RI)", x=env_costs["Environment"],
-                    y=env_costs[f"Azure ({csym}/yr)"], marker_color="#0078D4"))
+                    y=env_costs[f"Azure ({csym}/yr)"], marker_color="#0052CC"))
                 fig_env.update_layout(title="Annual Cost by Environment", barmode="group",
-                    template="plotly_dark", height=400,
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    template="plotly_white", height=400,
+                    paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC")
                 st.plotly_chart(fig_env, use_container_width=True)
 
             with ch2:
                 # Workload family distribution
                 fams = df_summary["Family"].value_counts()
                 fig_fam = go.Figure(data=[go.Pie(labels=fams.index.tolist(), values=fams.values.tolist(),
-                    marker_colors=["#00D4AA","#6C9FFF","#FFD93D","#FF6B6B","#A78BFA"], hole=0.4)])
+                    marker_colors=["#0052CC","#0A8754","#D97706","#DC3545","#6B46C1"], hole=0.4)])
                 fig_fam.update_layout(title=f"Workload Families ({n:,} servers)",
-                    template="plotly_dark", height=400,
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    template="plotly_white", height=400,
+                    paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC")
                 st.plotly_chart(fig_fam, use_container_width=True)
 
             ch3, ch4 = st.columns(2)
@@ -1454,28 +1530,29 @@ with tab_results:
                 # Savings distribution histogram
                 fig_h = go.Figure(data=[go.Histogram(
                     x=df_summary[f"Savings ({csym}/yr)"].tolist(), nbinsx=min(50, max(10, n // 100)),
-                    marker_color="#00D4AA")])
+                    marker_color="#0A8754")])
                 fig_h.update_layout(title=f"Savings Distribution ({n:,} servers)",
                     xaxis_title=f"Annual Savings ({csym})", yaxis_title="Server Count",
-                    template="plotly_dark", height=350,
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    template="plotly_white", height=350,
+                    paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC")
                 st.plotly_chart(fig_h, use_container_width=True)
 
             with ch4:
                 # Cost by server type
                 type_costs = df_summary.groupby("Server Type")[f"Savings ({csym}/yr)"].sum().sort_values(ascending=False)
                 fig_t = go.Figure(data=[go.Bar(x=type_costs.index.tolist(), y=type_costs.values.tolist(),
-                    marker_color="#6C9FFF")])
+                    marker_color="#0052CC")])
                 fig_t.update_layout(title="Total Savings by Server Type",
-                    yaxis_title=f"Savings ({csym}/yr)", template="plotly_dark", height=350,
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    yaxis_title=f"Savings ({csym}/yr)", template="plotly_white", height=350,
+                    paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC")
                 st.plotly_chart(fig_t, use_container_width=True)
 
         # ── AI STRATEGY ─────────────────────────────────────────────────────
         if show_ai and api_key:
             st.markdown('<div class="section-header">🤖 AI Portfolio Strategy</div>', unsafe_allow_html=True)
-            if st.button("🧠 Generate Executive Decision Brief", type="primary", key="ai_b"):
-                with st.spinner("Claude analyzing portfolio: cross-provider costs, migration waves, risk register, 3-year projection…"):
+            st.caption("AI analyzes sizing optimization, PaaS vs IaaS for each workload, migration gaps, wave planning, and financial projections")
+            if st.button("🧠 Generate Executive Decision Brief (Sizing + PaaS/IaaS + Gaps)", type="primary", key="ai_b"):
+                with st.spinner("Claude analyzing portfolio: sizing, PaaS/IaaS, gaps, wave plan, risk register, 3-year projection…"):
                     s = get_batch_ai_summary(results, api_key)
                 render_ai_analysis(s, "Executive Portfolio Analysis")
 
@@ -1614,17 +1691,17 @@ with tab_scenarios:
         years = [p["year"] for p in projection["on_prem"]]
         fig_proj.add_trace(go.Scatter(
             x=years, y=[p["annual_cost"] * cmult for p in projection["on_prem"]],
-            name="On-Premises", mode="lines+markers", line=dict(color="#FF6B6B", width=3),
+            name="On-Premises", mode="lines+markers", line=dict(color="#DC3545", width=3),
         ))
         fig_proj.add_trace(go.Scatter(
             x=years, y=[p["annual_cost"] * cmult for p in projection["cloud"]],
-            name="Cloud", mode="lines+markers", line=dict(color="#00D4AA", width=3),
+            name="Cloud", mode="lines+markers", line=dict(color="#0052CC", width=3),
         ))
         fig_proj.update_layout(
             title=f"{proj_years}-Year Cost Projection",
             xaxis_title="Year", yaxis_title=f"Annual Cost ({csym})",
-            template="plotly_dark", height=400,
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            template="plotly_white", height=400,
+            paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC",
         )
         st.plotly_chart(fig_proj, use_container_width=True)
 
