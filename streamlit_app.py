@@ -127,325 +127,36 @@ def render_ai_analysis(text: str, title: str = "Claude AI Analysis"):
 st.set_page_config(page_title="Cloud Migration Analyzer", page_icon="☁️",
                    layout="wide", initial_sidebar_state="expanded")
 
-# ─── Custom CSS ──────────────────────────────────────────────────────────────
+# ─── Custom CSS — Dark Enterprise Theme ─────────────────────────────────────
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
-    /* Override Streamlit dark theme variables at every specificity level */
-    :root,
-    [data-theme="dark"],
-    [data-theme="dark"] :root,
-    .stApp[data-theme="dark"],
-    html[data-theme="dark"],
-    body[data-theme="dark"] {
-        --primary-color: #0052CC !important;
-        --background-color: #FFFFFF !important;
-        --secondary-background-color: #F4F6F9 !important;
-        --text-color: #1A2B3C !important;
-        color-scheme: light !important;
-    }
     :root {
-        --primary:#0052CC; --primary-light:#E6F0FF; --primary-dark:#003D99;
-        --accent:#0052CC; --surface:#FFFFFF; --surface2:#F4F6F9; --surface3:#EDF0F5;
-        --danger:#DC3545; --warn:#D97706; --success:#0A8754; --info:#0052CC;
-        --text:#1A2B3C; --text-secondary:#5A6B7D; --text-muted:#8896A6;
-        --border:#DEE2E6; --border-light:#E9ECEF;
+        --primary:#4A9EFF; --primary-light:#1A2D4A; --primary-dark:#7FBFFF;
+        --accent:#4A9EFF; --surface:#141922; --surface2:#1A1F2E; --surface3:#222836;
+        --danger:#FF6B6B; --warn:#FFB347; --success:#4ADE80; --info:#4A9EFF;
+        --text:#E0E6ED; --text-secondary:#8B98A8; --text-muted:#5E6B7A;
+        --border:#2A3142; --border-light:#232A3A;
     }
-    /* ══════════════════════════════════════════════════════════════════════
-       FORCE LIGHT THEME — Nuclear override for Streamlit Cloud dark mode
-       Targets every known Streamlit container, widget, and CSS variable.
-       ══════════════════════════════════════════════════════════════════════ */
-
-    /* Override Streamlit's own CSS custom properties */
-    :root, [data-testid="stAppViewContainer"], .stApp {
-        --background-color: #FFFFFF !important;
-        --secondary-background-color: #F4F6F9 !important;
-        --text-color: #1A2B3C !important;
-        --font: 'Inter', sans-serif !important;
-        color-scheme: light !important;
-    }
-
-    /* Main app shell — every possible container */
-    html, body, .stApp, .stApp > header,
-    [data-testid="stAppViewContainer"],
-    [data-testid="stAppViewBlockContainer"],
-    [data-testid="stVerticalBlock"],
-    [data-testid="stHorizontalBlock"],
-    .main, .main > div, .block-container,
-    section[data-testid="stMain"],
-    section[data-testid="stMainBlockContainer"],
-    .appview-container, .main .block-container {
-        background-color: #FFFFFF !important;
-        color: #1A2B3C !important;
-    }
-
-    /* Top header bar / toolbar */
-    header[data-testid="stHeader"],
-    [data-testid="stHeader"],
-    .stApp > header,
-    [data-testid="stToolbar"] {
-        background-color: #FFFFFF !important;
-        border-bottom: 1px solid #E9ECEF !important;
-    }
-    [data-testid="stToolbar"] button { color: #5A6B7D !important; }
-
-    /* Sidebar — full depth */
-    [data-testid="stSidebar"],
-    [data-testid="stSidebar"] > div,
-    [data-testid="stSidebar"] > div > div,
-    [data-testid="stSidebar"] > div > div > div,
-    [data-testid="stSidebarContent"],
-    section[data-testid="stSidebar"] > div {
-        background-color: #F4F6F9 !important;
-        color: #1A2B3C !important;
-    }
-    [data-testid="stSidebar"] * { color: #1A2B3C !important; }
-    [data-testid="stSidebar"] .stMarkdown p,
-    [data-testid="stSidebar"] .stMarkdown span,
-    [data-testid="stSidebar"] label,
-    [data-testid="stSidebar"] .stRadio label { color: #1A2B3C !important; }
-    [data-testid="stSidebar"] .stSelectbox label,
-    [data-testid="stSidebar"] .stTextInput label { color: #5A6B7D !important; }
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #1A2B3C !important; }
-    /* Sidebar separator / dividers */
-    [data-testid="stSidebar"] hr,
-    [data-testid="stSidebar"] [data-testid="stSeparator"],
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] hr {
-        border-color: #DEE2E6 !important; background-color: transparent !important;
-        background: transparent !important; color: #DEE2E6 !important;
-    }
-
-    /* All text everywhere */
-    .stMarkdown, .stMarkdown p, .stMarkdown span, .stMarkdown li,
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
-    .stMarkdown h4, .stMarkdown h5, .stMarkdown h6,
-    .stMarkdown td, .stMarkdown th,
-    .stText, p, span, li, td, th, label, div {
-        color: #1A2B3C !important;
-    }
-    .stCaption, .stCaption p, small { color: #5A6B7D !important; }
-
-    /* Tabs */
-    [data-baseweb="tab-list"] { background-color: #FFFFFF !important; }
-    [data-baseweb="tab-panel"] { background-color: #FFFFFF !important; }
-    [data-baseweb="tab"] { color: #5A6B7D !important; background-color: transparent !important; }
-    [data-baseweb="tab"][aria-selected="true"] { color: #0052CC !important; }
-    [data-baseweb="tab-highlight"] { background-color: #0052CC !important; }
-    [data-baseweb="tab-border"] { background-color: #E9ECEF !important; }
-
-    /* Buttons — light blue style to guarantee visibility in dark mode */
-    /* Button CONTAINERS — kill any dark wrapper backgrounds */
-    .stButton, .stDownloadButton,
-    [data-testid="stDownloadButton"],
-    .stButton > div, .stDownloadButton > div,
-    [data-testid="stDownloadButton"] > div,
-    .stElementContainer:has(.stButton),
-    .stElementContainer:has(.stDownloadButton),
-    .stElementContainer:has([data-testid="stDownloadButton"]) {
-        background-color: transparent !important;
-        background: transparent !important;
-    }
-    .stButton > button[kind="primary"],
-    .stButton > button[data-testid="baseButton-primary"] {
-        color: #003D99 !important; background-color: #E6F0FF !important; border: 2px solid #0052CC !important;
-        font-weight: 600 !important;
-    }
-    .stButton > button[kind="secondary"],
-    .stButton > button[data-testid="baseButton-secondary"] {
-        color: #1A2B3C !important; background-color: #E6F0FF !important; border: 1px solid #B3D4FF !important;
-    }
-    .stButton > button {
-        color: #003D99 !important; background-color: #E6F0FF !important; border: 2px solid #0052CC !important;
-        font-weight: 600 !important;
-    }
-    .stButton > button:hover, .stButton > button:focus,
-    .stButton > button:active {
-        color: #003D99 !important; background-color: #CCE0FF !important; border-color: #003D99 !important;
-    }
-    .stDownloadButton > button,
-    .stDownloadButton > button:hover,
-    .stDownloadButton > button:focus,
-    .stDownloadButton > button:active,
-    [data-testid="stDownloadButton"] > button,
-    [data-testid="stDownloadButton"] > button:hover {
-        color: #003D99 !important; background-color: #E6F0FF !important; border: 2px solid #0052CC !important;
-        font-weight: 600 !important;
-    }
-    /* Sidebar buttons use lighter style */
-    [data-testid="stSidebar"] .stButton > button {
-        color: #1A2B3C !important; background-color: #F0F4FF !important; border: 1px solid #B3D4FF !important;
-    }
-    [data-testid="stSidebar"] .stButton > button:hover {
-        color: #003D99 !important; background-color: #E6F0FF !important;
-    }
-
-    /* Text inputs / password fields */
-    [data-baseweb="input"],
-    [data-baseweb="input"] > div,
-    [data-baseweb="base-input"] {
-        background-color: #FFFFFF !important;
-        color: #1A2B3C !important;
-        border-color: #DEE2E6 !important;
-    }
-    [data-baseweb="input"] input,
-    input[type="text"], input[type="password"], input[type="number"],
-    textarea { color: #1A2B3C !important; background-color: #FFFFFF !important; }
-
-    /* Selectboxes / Dropdowns */
-    [data-baseweb="select"],
-    [data-baseweb="select"] > div,
-    [data-baseweb="popover"] > div,
-    [data-baseweb="menu"],
-    [data-baseweb="menu"] li,
-    [role="listbox"],
-    [role="listbox"] li,
-    [role="option"] {
-        background-color: #FFFFFF !important;
-        color: #1A2B3C !important;
-    }
-    [data-baseweb="select"] span { color: #1A2B3C !important; }
-    /* Dropdown arrow */
-    [data-baseweb="select"] svg { fill: #5A6B7D !important; color: #5A6B7D !important; }
-
-    /* Expanders */
-    [data-testid="stExpander"] { background-color: #FFFFFF !important; border-color: #E9ECEF !important; }
-    [data-testid="stExpander"] summary { color: #1A2B3C !important; background-color: #FFFFFF !important; }
-    [data-testid="stExpander"] summary span { color: #1A2B3C !important; }
-    [data-testid="stExpander"] details { background-color: #FFFFFF !important; }
-    [data-testid="stExpander"] details div { color: #1A2B3C !important; }
-    [data-testid="stExpander"] svg { fill: #5A6B7D !important; }
-
-    /* Data tables / DataFrames */
-    .stDataFrame, [data-testid="stTable"],
-    [data-testid="stDataFrame"],
-    [data-testid="stDataFrame"] > div {
-        background-color: #FFFFFF !important;
-    }
-    [data-testid="stTable"] td, [data-testid="stTable"] th,
-    .stDataFrame td, .stDataFrame th { color: #1A2B3C !important; }
-    /* Glide data grid (Streamlit's table component) */
-    [data-testid="glide-data-grid-canvas"] { background-color: #FFFFFF !important; }
-
-    /* File uploader — all containers and children forced light */
-    [data-testid="stFileUploader"],
-    [data-testid="stFileUploader"] > div,
-    [data-testid="stFileUploader"] > div > div,
-    [data-testid="stFileUploader"] section,
-    [data-testid="stFileUploaderDropzone"],
-    [data-testid="stFileUploaderDropzoneInput"],
-    .stFileUploader, .stFileUploader > div,
-    .uploadedFile {
-        background-color: #F0F4FF !important;
-        background: #F0F4FF !important;
-        border-color: #B3D4FF !important;
-        color: #1A2B3C !important;
-    }
-    [data-testid="stFileUploader"] label,
-    [data-testid="stFileUploader"] span,
-    [data-testid="stFileUploader"] p,
-    [data-testid="stFileUploader"] small,
-    [data-testid="stFileUploaderDropzone"] span,
-    [data-testid="stFileUploaderDropzone"] div { color: #1A2B3C !important; }
-    [data-testid="stFileUploaderDropzone"] small { color: #5A6B7D !important; }
-    /* Browse files button inside file uploader */
-    [data-testid="stFileUploaderDropzone"] button,
-    [data-testid="stFileUploader"] button,
-    [data-testid="stFileUploaderDropzoneInput"] button,
-    .uploadedFile button {
-        color: #003D99 !important; background-color: #E6F0FF !important;
-        background: #E6F0FF !important; border: 1px solid #0052CC !important;
-        font-weight: 600 !important;
-    }
-    [data-testid="stFileUploaderDropzone"] button:hover,
-    [data-testid="stFileUploader"] button:hover {
-        background-color: #CCE0FF !important; background: #CCE0FF !important;
-    }
-    /* Upload icon */
-    [data-testid="stFileUploaderDropzone"] svg {
-        fill: #0052CC !important; color: #0052CC !important;
-    }
-    /* Uploaded file name */
-    [data-testid="stFileUploaderFile"] { background-color: #FFFFFF !important; color: #1A2B3C !important; }
-    [data-testid="stFileUploaderFile"] span { color: #1A2B3C !important; }
-    [data-testid="stFileUploaderFile"] small { color: #5A6B7D !important; }
-
-    /* Toggle / checkbox / radio */
-    [data-testid="stToggle"] label span { color: #1A2B3C !important; }
-    .stCheckbox label span, .stRadio label div { color: #1A2B3C !important; }
-    [data-testid="stCheckbox"] label span { color: #1A2B3C !important; }
-    .stRadio > div > label > div { color: #1A2B3C !important; }
-
-    /* Alerts / info / success / warning / error boxes */
-    [data-testid="stAlert"] { color: #1A2B3C !important; }
-    [data-testid="stAlert"] p { color: inherit !important; }
-    .stSuccess, .stInfo, .stWarning, .stError { color: #1A2B3C !important; }
-
-    /* Spinner / progress */
-    .stSpinner > div { color: #5A6B7D !important; }
-
-    /* Dividers / separators everywhere */
-    hr, [data-testid="stSeparator"] {
-        border-color: #DEE2E6 !important; background-color: transparent !important;
-        background: transparent !important;
-    }
-
-    /* Plotly chart containers */
-    [data-testid="stPlotlyChart"] { background-color: #FFFFFF !important; }
-
-    /* Tooltip / popover */
-    [data-testid="stTooltipContent"] { background-color: #FFFFFF !important; color: #1A2B3C !important; }
-
-    /* Bottom page padding area */
-    .reportview-container .main footer { background-color: #FFFFFF !important; }
-    footer { background-color: #FFFFFF !important; color: #5A6B7D !important; }
-    footer a { color: #0052CC !important; }
-
-    /* ══════════════════════════════════════════════════════════════════
-       NUCLEAR CATCH-ALL — Force light blue on ANY remaining dark element
-       This catches Streamlit Cloud dark mode containers we missed above.
-       ══════════════════════════════════════════════════════════════════ */
-    [data-theme="dark"] div,
-    [data-theme="dark"] section,
-    [data-theme="dark"] header,
-    [data-theme="dark"] footer,
-    [data-theme="dark"] aside,
-    [data-theme="dark"] main,
-    [data-theme="dark"] nav {
-        background-color: #FFFFFF !important;
-        color: #1A2B3C !important;
-    }
-    [data-theme="dark"] button {
-        background-color: #E6F0FF !important;
-        color: #003D99 !important;
-        border-color: #0052CC !important;
-    }
-    /* Element containers — wrappers Streamlit adds around each widget */
-    .stElementContainer,
-    [data-testid="stElementContainer"],
-    [data-testid="element-container"],
-    .element-container {
-        background-color: transparent !important;
-        background: transparent !important;
-    }
-    /* Scrollbar for light theme */
-    ::-webkit-scrollbar { background: #F4F6F9; width: 8px; }
-    ::-webkit-scrollbar-thumb { background: #C4CDD5; border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: #8896A6; }
     .stApp { font-family:'Inter',system-ui,-apple-system,sans-serif; }
+    /* Scrollbar */
+    ::-webkit-scrollbar { background: #0E1117; width: 8px; }
+    ::-webkit-scrollbar-thumb { background: #2A3142; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3A4558; }
     /* Header */
-    .main-header { background:#FFFFFF; padding:1.8rem 2.2rem; border-radius:12px; margin-bottom:1rem;
+    .main-header { background:var(--surface); padding:1.8rem 2.2rem; border-radius:12px; margin-bottom:1rem;
         border:1px solid var(--border); border-bottom:3px solid var(--primary); }
     .main-header h1 { font-size:1.75rem; font-weight:700; color:var(--text); margin:0 0 .25rem 0; letter-spacing:-0.3px; }
     .main-header p { color:var(--text-secondary); font-size:0.92rem; margin:0; }
     /* Compliance banner */
-    .compliance-banner { background:var(--primary-light); border:1px solid #B3D4FF;
+    .compliance-banner { background:var(--primary-light); border:1px solid #2A4060;
         border-radius:8px; padding:0.7rem 1.2rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.8rem; }
     .compliance-banner .icon { font-size:1.2rem; }
     .compliance-banner .text { color:var(--primary-dark); font-size:0.82rem; font-weight:500; }
     /* Metric cards */
-    .metric-card { background:#FFFFFF; padding:1.1rem 1.4rem; border-radius:10px;
-        border:1px solid var(--border-light); border-left:4px solid var(--primary); margin-bottom:0.7rem;
-        box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+    .metric-card { background:var(--surface); padding:1.1rem 1.4rem; border-radius:10px;
+        border:1px solid var(--border); border-left:4px solid var(--primary); margin-bottom:0.7rem;
+        box-shadow:0 2px 6px rgba(0,0,0,0.2); }
     .metric-card .label { color:var(--text-muted); font-size:0.72rem; text-transform:uppercase;
         letter-spacing:0.8px; font-weight:600; margin-bottom:4px; }
     .metric-card .value { color:var(--text); font-size:1.4rem; font-weight:700;
@@ -459,25 +170,25 @@ st.markdown("""
     .metric-yellow .sub { color:var(--warn); }
     /* Section headers */
     .section-header { font-size:0.82rem; font-weight:700; color:var(--primary); padding-bottom:0.5rem;
-        border-bottom:2px solid var(--border-light); margin:1.5rem 0 1rem 0; text-transform:uppercase; letter-spacing:1.2px; }
+        border-bottom:2px solid var(--border); margin:1.5rem 0 1rem 0; text-transform:uppercase; letter-spacing:1.2px; }
     /* Output tables */
-    .output-table { background:#FFFFFF; border-radius:10px; overflow:hidden; margin-bottom:1rem;
-        border:1px solid var(--border-light); }
+    .output-table { background:var(--surface); border-radius:10px; overflow:hidden; margin-bottom:1rem;
+        border:1px solid var(--border); }
     .output-table table { width:100%; border-collapse:collapse; }
     .output-table th { background:var(--surface2); color:var(--primary); padding:.65rem 1rem;
         text-align:left; font-size:.72rem; text-transform:uppercase; letter-spacing:0.8px; font-weight:600; }
-    .output-table td { padding:.55rem 1rem; color:var(--text); border-bottom:1px solid var(--border-light);
+    .output-table td { padding:.55rem 1rem; color:var(--text); border-bottom:1px solid var(--border);
         font-family:'IBM Plex Mono',monospace; font-size:.85rem; }
     .output-table tr:last-child td { border-bottom:none; }
     .output-table tr:hover td { background:var(--surface2); }
     /* AI analysis box */
-    .ai-box { background:#FFFFFF; border:1px solid var(--border); border-left:4px solid var(--primary);
-        border-radius:10px; padding:1.8rem 2rem; margin:1.2rem 0; box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+    .ai-box { background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--primary);
+        border-radius:10px; padding:1.8rem 2rem; margin:1.2rem 0; box-shadow:0 2px 6px rgba(0,0,0,0.2); }
     .ai-box h4 { color:var(--primary); margin:0 0 .3rem 0; font-size:1.1rem; }
     .ai-box .ai-subtitle { color:var(--text-muted); font-size:.8rem; margin-bottom:1rem;
-        padding-bottom:.6rem; border-bottom:1px solid var(--border-light); }
+        padding-bottom:.6rem; border-bottom:1px solid var(--border); }
     .ai-box h5 { color:var(--primary-dark); margin:1.2rem 0 .4rem 0;
-        border-bottom:1px solid var(--border-light); padding-bottom:.3rem; font-size:.95rem; }
+        border-bottom:1px solid var(--border); padding-bottom:.3rem; font-size:.95rem; }
     .ai-box p { color:var(--text); line-height:1.65; margin:0.4rem 0; }
     .ai-box ul, .ai-box ol { color:var(--text); padding-left:1.4rem; }
     .ai-box li { margin:0.3rem 0; line-height:1.55; }
@@ -486,45 +197,45 @@ st.markdown("""
     .ai-box table { width:100%; border-collapse:collapse; margin:.6rem 0; }
     .ai-box table th { background:var(--surface2); color:var(--primary); padding:.5rem .8rem; text-align:left;
         border-bottom:2px solid var(--border); font-size:.78rem; font-weight:600; }
-    .ai-box table td { padding:.4rem .8rem; border-bottom:1px solid var(--border-light); color:var(--text);
+    .ai-box table td { padding:.4rem .8rem; border-bottom:1px solid var(--border); color:var(--text);
         font-size:.82rem; }
     .ai-box table tr:hover td { background:var(--surface2); }
-    .ai-box hr { border:none; border-top:1px solid var(--border-light); margin:1rem 0; }
+    .ai-box hr { border:none; border-top:1px solid var(--border); margin:1rem 0; }
     /* Badges */
     .badge { display:inline-block; padding:.2rem .6rem; border-radius:20px; font-size:.73rem; font-weight:600; }
-    .badge-live { background:#E6F9F1; color:var(--success); border:1px solid #B3E8D0; }
-    .badge-ref { background:var(--primary-light); color:var(--primary); border:1px solid #B3D4FF; }
+    .badge-live { background:#0D2E1A; color:var(--success); border:1px solid #1A5C33; }
+    .badge-ref { background:var(--primary-light); color:var(--primary); border:1px solid #2A4060; }
     /* Server card */
-    .server-card { background:#FFFFFF; border-radius:10px; padding:1rem 1.2rem; margin:.6rem 0;
-        border:1px solid var(--border-light); border-left:3px solid var(--primary); }
+    .server-card { background:var(--surface); border-radius:10px; padding:1rem 1.2rem; margin:.6rem 0;
+        border:1px solid var(--border); border-left:3px solid var(--primary); }
     .server-card .sname { color:var(--text); font-weight:700; font-size:1rem; }
     .server-card .sdetail { color:var(--text-secondary); font-size:.82rem; margin-top:4px; }
     /* Cost breakdown */
     .cost-breakdown { background:var(--surface2); border-radius:8px; padding:1rem 1.2rem; margin:.5rem 0;
-        font-size:.85rem; border:1px solid var(--border-light); }
+        font-size:.85rem; border:1px solid var(--border); }
     .cost-breakdown .cb-row { display:flex; justify-content:space-between; padding:3px 0; color:var(--text-secondary); }
     .cost-breakdown .cb-total { border-top:2px solid var(--border); margin-top:6px; padding-top:6px;
         font-weight:700; color:var(--text); }
     /* Connectivity indicators */
     .conn-indicator { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:8px;
         margin:4px 0; font-size:.82rem; }
-    .conn-ok { background:#E6F9F1; border:1px solid #B3E8D0; color:var(--success); }
-    .conn-err { background:#FDE8E8; border:1px solid #F5B7B7; color:var(--danger); }
-    .conn-warn { background:#FEF3CD; border:1px solid #F5DFA0; color:var(--warn); }
+    .conn-ok { background:#0D2E1A; border:1px solid #1A5C33; color:var(--success); }
+    .conn-err { background:#2E0D0D; border:1px solid #5C1A1A; color:var(--danger); }
+    .conn-warn { background:#2E2A0D; border:1px solid #5C4D1A; color:var(--warn); }
     .conn-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
     .conn-dot-ok { background:var(--success); }
     .conn-dot-err { background:var(--danger); }
     .conn-dot-warn { background:var(--warn); }
     .source-tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:.72rem;
-        background:var(--primary-light); color:var(--primary); border:1px solid #B3D4FF; margin:2px 0; }
-    .method-box { background:#FFFFFF; border-radius:10px; padding:1.2rem; margin:.8rem 0;
-        border:1px solid var(--border-light); font-size:.85rem; }
+        background:var(--primary-light); color:var(--primary); border:1px solid #2A4060; margin:2px 0; }
+    .method-box { background:var(--surface); border-radius:10px; padding:1.2rem; margin:.8rem 0;
+        border:1px solid var(--border); font-size:.85rem; }
     /* Streamlit overrides for enterprise look */
-    .stTabs [data-baseweb="tab-list"] { gap:0; border-bottom:2px solid var(--border-light); }
+    .stTabs [data-baseweb="tab-list"] { gap:0; border-bottom:2px solid var(--border); }
     .stTabs [data-baseweb="tab"] { font-weight:600; font-size:.85rem; letter-spacing:0.2px;
         padding:0.7rem 1.4rem; color:var(--text-secondary); }
     .stTabs [aria-selected="true"] { color:var(--primary); border-bottom:3px solid var(--primary); }
-    div[data-testid="stExpander"] { border:1px solid var(--border-light); border-radius:8px; }
+    div[data-testid="stExpander"] { border:1px solid var(--border); border-radius:8px; }
     div[data-testid="stExpander"] summary { font-weight:600; color:var(--text); }
 </style>
 """, unsafe_allow_html=True)
@@ -1181,20 +892,20 @@ def render_single_output(inputs: Dict, outputs: Dict):
             st.markdown(f"""<div class="cost-breakdown">
                 <strong style="color:var(--accent);">📊 Annual TCO Breakdown — Industry-Sourced Rates</strong>
                 <div class="cb-row"><span>🖥️ Hardware Compute ({int(float(inputs.get('vcpu_count',0)))} vCPU × $130/yr amortized)</span><span>${bk['hw_compute']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('compute','Dell PowerEdge R760, 5-yr lifecycle')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5E6B7A;">↳ {sources.get('compute','Dell PowerEdge R760, 5-yr lifecycle')}</div>
                 <div class="cb-row"><span>🧠 Hardware Memory ({float(inputs.get('memory_gb',0))} GB × $10/yr amortized)</span><span>${bk['hw_memory']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('memory','DDR5 RDIMM enterprise pricing')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5E6B7A;">↳ {sources.get('memory','DDR5 RDIMM enterprise pricing')}</div>
                 <div class="cb-row"><span>💾 Hardware Storage ({float(inputs.get('total_storage_gb',0))} GB × $0.08/yr blended SSD/HDD)</span><span>${bk['hw_storage']:,.2f}</span></div>
                 <div class="cb-row" style="font-weight:600; border-top:1px solid var(--border); padding-top:4px; color:var(--text);">
                     <span>Hardware Subtotal</span><span>${bk['hw_total']:,.2f}</span></div>
                 <div class="cb-row"><span>⚡ Power & Cooling ({bk.get('server_watts',0):.0f}W × PUE {bk.get('pue',1.55)} × {bk.get('power_kwh_yr',0):,.0f} kWh/yr × ${bk.get('electricity_rate',0.12)}/kWh)</span><span>${bk['power_cooling']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('power','US DOE 2024 Report, EIA')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5E6B7A;">↳ {sources.get('power','US DOE 2024 Report, EIA')}</div>
                 <div class="cb-row"><span>🏢 Facility / Colocation Rack Share</span><span>${bk['facility']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('facility','ENCOR Advisors, Brightlio 2025')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5E6B7A;">↳ {sources.get('facility','ENCOR Advisors, Brightlio 2025')}</div>
                 <div class="cb-row"><span>👷 Admin & Labor Overhead (SysAdmin allocation)</span><span>${bk['admin_labor']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('labor','Gartner benchmarks, Sherweb TCO')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5E6B7A;">↳ {sources.get('labor','Gartner benchmarks, Sherweb TCO')}</div>
                 <div class="cb-row"><span>📜 OS Licensing ({bk.get('licensing_name','Linux')})</span><span>${bk['annual_licensing']:,.2f}</span></div>
-                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5A6B7D;">↳ {sources.get('licensing','Dell configurator pricing')}</div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5E6B7A;">↳ {sources.get('licensing','Dell configurator pricing')}</div>
                 <div class="cb-row cb-total"><span>On-Prem Yearly Cost</span><span>${outputs['on_prem_yearly_cost']:,.2f}</span></div>
             </div>""", unsafe_allow_html=True)
     with t2:
@@ -1227,26 +938,26 @@ def render_single_output(inputs: Dict, outputs: Dict):
             cats = ["On-Demand", "1-Year RI", "3-Year RI"]
             fig.add_trace(go.Bar(name="Current IaaS", x=cats,
                 y=[outputs['iaas_on_demand_price']*cmult, outputs['iaas_reserved_1yr_price']*cmult, outputs['iaas_reserved_3yr_price']*cmult],
-                marker_color="#DC3545"))
+                marker_color="#FF6B6B"))
             fig.add_trace(go.Bar(name="Right-Sized IaaS", x=cats,
                 y=[outputs['iaas_rec_on_demand']*cmult, outputs['iaas_rec_reserved_1yr']*cmult, outputs['iaas_rec_reserved_3yr']*cmult],
-                marker_color="#0A8754"))
+                marker_color="#4ADE80"))
             fig.add_trace(go.Bar(name="PaaS", x=cats,
                 y=[outputs['paas_on_demand']*cmult, outputs['paas_reserved_1yr']*cmult, outputs['paas_reserved_3yr']*cmult],
-                marker_color="#0052CC"))
-            fig.update_layout(title="Monthly Cost Comparison", barmode="group", template="plotly_white",
-                paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC", height=420)
+                marker_color="#4A9EFF"))
+            fig.update_layout(title="Monthly Cost Comparison", barmode="group", template="plotly_dark",
+                paper_bgcolor="#141922", plot_bgcolor="#1A1F2E", font_color="#E0E6ED", height=420)
             st.plotly_chart(fig, use_container_width=True)
         with ch2:
             fig_g = make_subplots(rows=1, cols=3, specs=[[{"type":"indicator"}]*3],
                                   subplot_titles=["CPU", "Memory", "Storage"])
-            for i, (v, col) in enumerate([(float(inputs['avg_cpu_usage']), "#0A8754"),
-                                           (float(inputs['avg_memory_usage']), "#0052CC"),
-                                           (float(inputs['storage_usage_pct']), "#D97706")]):
+            for i, (v, col) in enumerate([(float(inputs['avg_cpu_usage']), "#4ADE80"),
+                                           (float(inputs['avg_memory_usage']), "#4A9EFF"),
+                                           (float(inputs['storage_usage_pct']), "#FFB347")]):
                 fig_g.add_trace(go.Indicator(mode="gauge+number", value=v,
-                    gauge=dict(axis=dict(range=[0,100]), bar=dict(color=col), bgcolor="#F4F6F9"),
+                    gauge=dict(axis=dict(range=[0,100]), bar=dict(color=col), bgcolor="#1A1F2E"),
                     number=dict(suffix="%")), row=1, col=i+1)
-            fig_g.update_layout(template="plotly_white", height=350, paper_bgcolor="#FFFFFF")
+            fig_g.update_layout(template="plotly_dark", height=350, paper_bgcolor="#141922", font_color="#E0E6ED")
             st.plotly_chart(fig_g, use_container_width=True)
 
     # ── ENHANCED ANALYSIS SECTIONS ────────────────────────────────────────
@@ -1798,24 +1509,24 @@ with tab_results:
                     f"Azure ({csym}/yr)": "sum"}).reset_index()
                 fig_env = go.Figure()
                 fig_env.add_trace(go.Bar(name="On-Prem", x=env_costs["Environment"],
-                    y=env_costs[f"On-Prem ({csym}/yr)"], marker_color="#DC3545"))
+                    y=env_costs[f"On-Prem ({csym}/yr)"], marker_color="#FF6B6B"))
                 fig_env.add_trace(go.Bar(name="AWS (3yr RI)", x=env_costs["Environment"],
                     y=env_costs[f"AWS ({csym}/yr)"], marker_color="#E8850C"))
                 fig_env.add_trace(go.Bar(name="Azure (3yr RI)", x=env_costs["Environment"],
-                    y=env_costs[f"Azure ({csym}/yr)"], marker_color="#0052CC"))
+                    y=env_costs[f"Azure ({csym}/yr)"], marker_color="#4A9EFF"))
                 fig_env.update_layout(title="Annual Cost by Environment", barmode="group",
-                    template="plotly_white", height=400,
-                    paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC")
+                    template="plotly_dark", height=400,
+                    paper_bgcolor="#141922", plot_bgcolor="#1A1F2E", font_color="#E0E6ED")
                 st.plotly_chart(fig_env, use_container_width=True)
 
             with ch2:
                 # Workload family distribution
                 fams = df_summary["Family"].value_counts()
                 fig_fam = go.Figure(data=[go.Pie(labels=fams.index.tolist(), values=fams.values.tolist(),
-                    marker_colors=["#0052CC","#0A8754","#D97706","#DC3545","#6B46C1"], hole=0.4)])
+                    marker_colors=["#4A9EFF","#4ADE80","#FFB347","#FF6B6B","#A78BFA"], hole=0.4)])
                 fig_fam.update_layout(title=f"Workload Families ({n:,} servers)",
-                    template="plotly_white", height=400,
-                    paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC")
+                    template="plotly_dark", height=400,
+                    paper_bgcolor="#141922", plot_bgcolor="#1A1F2E", font_color="#E0E6ED")
                 st.plotly_chart(fig_fam, use_container_width=True)
 
             ch3, ch4 = st.columns(2)
@@ -1823,21 +1534,21 @@ with tab_results:
                 # Savings distribution histogram
                 fig_h = go.Figure(data=[go.Histogram(
                     x=df_summary[f"Savings ({csym}/yr)"].tolist(), nbinsx=min(50, max(10, n // 100)),
-                    marker_color="#0A8754")])
+                    marker_color="#4ADE80")])
                 fig_h.update_layout(title=f"Savings Distribution ({n:,} servers)",
                     xaxis_title=f"Annual Savings ({csym})", yaxis_title="Server Count",
-                    template="plotly_white", height=350,
-                    paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC")
+                    template="plotly_dark", height=350,
+                    paper_bgcolor="#141922", plot_bgcolor="#1A1F2E", font_color="#E0E6ED")
                 st.plotly_chart(fig_h, use_container_width=True)
 
             with ch4:
                 # Cost by server type
                 type_costs = df_summary.groupby("Server Type")[f"Savings ({csym}/yr)"].sum().sort_values(ascending=False)
                 fig_t = go.Figure(data=[go.Bar(x=type_costs.index.tolist(), y=type_costs.values.tolist(),
-                    marker_color="#0052CC")])
+                    marker_color="#4A9EFF")])
                 fig_t.update_layout(title="Total Savings by Server Type",
-                    yaxis_title=f"Savings ({csym}/yr)", template="plotly_white", height=350,
-                    paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC")
+                    yaxis_title=f"Savings ({csym}/yr)", template="plotly_dark", height=350,
+                    paper_bgcolor="#141922", plot_bgcolor="#1A1F2E", font_color="#E0E6ED")
                 st.plotly_chart(fig_t, use_container_width=True)
 
         # ── AI STRATEGY ─────────────────────────────────────────────────────
@@ -1984,17 +1695,17 @@ with tab_scenarios:
         years = [p["year"] for p in projection["on_prem"]]
         fig_proj.add_trace(go.Scatter(
             x=years, y=[p["annual_cost"] * cmult for p in projection["on_prem"]],
-            name="On-Premises", mode="lines+markers", line=dict(color="#DC3545", width=3),
+            name="On-Premises", mode="lines+markers", line=dict(color="#FF6B6B", width=3),
         ))
         fig_proj.add_trace(go.Scatter(
             x=years, y=[p["annual_cost"] * cmult for p in projection["cloud"]],
-            name="Cloud", mode="lines+markers", line=dict(color="#0052CC", width=3),
+            name="Cloud", mode="lines+markers", line=dict(color="#4A9EFF", width=3),
         ))
         fig_proj.update_layout(
             title=f"{proj_years}-Year Cost Projection",
             xaxis_title="Year", yaxis_title=f"Annual Cost ({csym})",
-            template="plotly_white", height=400,
-            paper_bgcolor="#FFFFFF", plot_bgcolor="#FAFBFC",
+            template="plotly_dark", height=400,
+            paper_bgcolor="#141922", plot_bgcolor="#1A1F2E", font_color="#E0E6ED",
         )
         st.plotly_chart(fig_proj, use_container_width=True)
 
