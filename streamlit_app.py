@@ -131,6 +131,19 @@ st.set_page_config(page_title="Cloud Migration Analyzer", page_icon="☁️",
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+    /* Override Streamlit dark theme variables at every specificity level */
+    :root,
+    [data-theme="dark"],
+    [data-theme="dark"] :root,
+    .stApp[data-theme="dark"],
+    html[data-theme="dark"],
+    body[data-theme="dark"] {
+        --primary-color: #0052CC !important;
+        --background-color: #FFFFFF !important;
+        --secondary-background-color: #F4F6F9 !important;
+        --text-color: #1A2B3C !important;
+        color-scheme: light !important;
+    }
     :root {
         --primary:#0052CC; --primary-light:#E6F0FF; --primary-dark:#003D99;
         --accent:#0052CC; --surface:#FFFFFF; --surface2:#F4F6F9; --surface3:#EDF0F5;
@@ -138,57 +151,190 @@ st.markdown("""
         --text:#1A2B3C; --text-secondary:#5A6B7D; --text-muted:#8896A6;
         --border:#DEE2E6; --border-light:#E9ECEF;
     }
-    /* ── Force light theme (override Streamlit dark mode / user preference) ── */
-    .stApp, .stApp > header, [data-testid="stAppViewContainer"],
-    [data-testid="stAppViewBlockContainer"], .main, .block-container {
-        background-color: #FFFFFF !important; color: #1A2B3C !important;
+    /* ══════════════════════════════════════════════════════════════════════
+       FORCE LIGHT THEME — Nuclear override for Streamlit Cloud dark mode
+       Targets every known Streamlit container, widget, and CSS variable.
+       ══════════════════════════════════════════════════════════════════════ */
+
+    /* Override Streamlit's own CSS custom properties */
+    :root, [data-testid="stAppViewContainer"], .stApp {
+        --background-color: #FFFFFF !important;
+        --secondary-background-color: #F4F6F9 !important;
+        --text-color: #1A2B3C !important;
+        --font: 'Inter', sans-serif !important;
+        color-scheme: light !important;
     }
-    [data-testid="stSidebar"], [data-testid="stSidebar"] > div:first-child {
-        background-color: #F4F6F9 !important; color: #1A2B3C !important;
+
+    /* Main app shell — every possible container */
+    html, body, .stApp, .stApp > header,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stAppViewBlockContainer"],
+    [data-testid="stVerticalBlock"],
+    [data-testid="stHorizontalBlock"],
+    .main, .main > div, .block-container,
+    section[data-testid="stMain"],
+    section[data-testid="stMainBlockContainer"],
+    .appview-container, .main .block-container {
+        background-color: #FFFFFF !important;
+        color: #1A2B3C !important;
+    }
+
+    /* Top header bar / toolbar */
+    header[data-testid="stHeader"],
+    [data-testid="stHeader"],
+    .stApp > header,
+    [data-testid="stToolbar"] {
+        background-color: #FFFFFF !important;
+        border-bottom: 1px solid #E9ECEF !important;
+    }
+    [data-testid="stToolbar"] button { color: #5A6B7D !important; }
+
+    /* Sidebar — full depth */
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] > div,
+    [data-testid="stSidebar"] > div > div,
+    [data-testid="stSidebar"] > div > div > div,
+    [data-testid="stSidebarContent"],
+    section[data-testid="stSidebar"] > div {
+        background-color: #F4F6F9 !important;
+        color: #1A2B3C !important;
     }
     [data-testid="stSidebar"] * { color: #1A2B3C !important; }
     [data-testid="stSidebar"] .stMarkdown p,
     [data-testid="stSidebar"] .stMarkdown span,
-    [data-testid="stSidebar"] label { color: #1A2B3C !important; }
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stRadio label { color: #1A2B3C !important; }
     [data-testid="stSidebar"] .stSelectbox label,
     [data-testid="stSidebar"] .stTextInput label { color: #5A6B7D !important; }
     [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #1A2B3C !important; }
-    /* Force light on all Streamlit native elements */
+    /* Sidebar separator */
+    [data-testid="stSidebar"] hr { border-color: #DEE2E6 !important; }
+
+    /* All text everywhere */
     .stMarkdown, .stMarkdown p, .stMarkdown span, .stMarkdown li,
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+    .stMarkdown h4, .stMarkdown h5, .stMarkdown h6,
+    .stMarkdown td, .stMarkdown th,
+    .stText, p, span, li, td, th, label, div {
         color: #1A2B3C !important;
     }
-    .stCaption, .stCaption p { color: #5A6B7D !important; }
+    .stCaption, .stCaption p, small { color: #5A6B7D !important; }
+
     /* Tabs */
+    [data-baseweb="tab-list"] { background-color: #FFFFFF !important; }
     [data-baseweb="tab-panel"] { background-color: #FFFFFF !important; }
-    [data-baseweb="tab"] { color: #5A6B7D !important; }
+    [data-baseweb="tab"] { color: #5A6B7D !important; background-color: transparent !important; }
     [data-baseweb="tab"][aria-selected="true"] { color: #0052CC !important; }
-    /* Buttons */
+    [data-baseweb="tab-highlight"] { background-color: #0052CC !important; }
+    [data-baseweb="tab-border"] { background-color: #E9ECEF !important; }
+
+    /* Buttons — primary keeps white text, secondary/outline gets dark */
+    .stButton > button[kind="primary"] { color: #FFFFFF !important; }
+    .stButton > button[kind="secondary"] { color: #1A2B3C !important; background-color: #FFFFFF !important; border-color: #DEE2E6 !important; }
     .stButton > button { color: #FFFFFF !important; }
     .stDownloadButton > button { color: #FFFFFF !important; }
-    /* Text inputs / selectboxes */
-    [data-baseweb="input"] { background-color: #FFFFFF !important; color: #1A2B3C !important; }
-    [data-baseweb="input"] input { color: #1A2B3C !important; }
-    [data-baseweb="select"] { background-color: #FFFFFF !important; }
-    [data-baseweb="select"] > div { color: #1A2B3C !important; }
+
+    /* Text inputs / password fields */
+    [data-baseweb="input"],
+    [data-baseweb="input"] > div,
+    [data-baseweb="base-input"] {
+        background-color: #FFFFFF !important;
+        color: #1A2B3C !important;
+        border-color: #DEE2E6 !important;
+    }
+    [data-baseweb="input"] input,
+    input[type="text"], input[type="password"], input[type="number"],
+    textarea { color: #1A2B3C !important; background-color: #FFFFFF !important; }
+
+    /* Selectboxes / Dropdowns */
+    [data-baseweb="select"],
+    [data-baseweb="select"] > div,
+    [data-baseweb="popover"] > div,
+    [data-baseweb="menu"],
+    [data-baseweb="menu"] li,
+    [role="listbox"],
+    [role="listbox"] li,
+    [role="option"] {
+        background-color: #FFFFFF !important;
+        color: #1A2B3C !important;
+    }
+    [data-baseweb="select"] span { color: #1A2B3C !important; }
+    /* Dropdown arrow */
+    [data-baseweb="select"] svg { fill: #5A6B7D !important; color: #5A6B7D !important; }
+
     /* Expanders */
     [data-testid="stExpander"] { background-color: #FFFFFF !important; border-color: #E9ECEF !important; }
-    [data-testid="stExpander"] summary { color: #1A2B3C !important; }
+    [data-testid="stExpander"] summary { color: #1A2B3C !important; background-color: #FFFFFF !important; }
+    [data-testid="stExpander"] summary span { color: #1A2B3C !important; }
+    [data-testid="stExpander"] details { background-color: #FFFFFF !important; }
     [data-testid="stExpander"] details div { color: #1A2B3C !important; }
-    /* Tables */
-    .stDataFrame, [data-testid="stTable"] { background-color: #FFFFFF !important; }
-    [data-testid="stTable"] td, [data-testid="stTable"] th { color: #1A2B3C !important; }
+    [data-testid="stExpander"] svg { fill: #5A6B7D !important; }
+
+    /* Data tables / DataFrames */
+    .stDataFrame, [data-testid="stTable"],
+    [data-testid="stDataFrame"],
+    [data-testid="stDataFrame"] > div {
+        background-color: #FFFFFF !important;
+    }
+    [data-testid="stTable"] td, [data-testid="stTable"] th,
+    .stDataFrame td, .stDataFrame th { color: #1A2B3C !important; }
+    /* Glide data grid (Streamlit's table component) */
+    [data-testid="glide-data-grid-canvas"] { background-color: #FFFFFF !important; }
+
     /* File uploader */
-    [data-testid="stFileUploader"] { background-color: #FFFFFF !important; }
-    [data-testid="stFileUploader"] label { color: #1A2B3C !important; }
-    /* Toggle */
+    [data-testid="stFileUploader"],
+    [data-testid="stFileUploader"] > div,
+    [data-testid="stFileUploader"] section,
+    [data-testid="stFileUploaderDropzone"],
+    [data-testid="stFileUploaderDropzoneInput"] {
+        background-color: #F4F6F9 !important;
+        border-color: #DEE2E6 !important;
+        color: #1A2B3C !important;
+    }
+    [data-testid="stFileUploader"] label,
+    [data-testid="stFileUploader"] span,
+    [data-testid="stFileUploader"] p,
+    [data-testid="stFileUploader"] small,
+    [data-testid="stFileUploaderDropzone"] span,
+    [data-testid="stFileUploaderDropzone"] div { color: #1A2B3C !important; }
+    [data-testid="stFileUploaderDropzone"] small { color: #5A6B7D !important; }
+    /* Uploaded file name */
+    [data-testid="stFileUploaderFile"] { background-color: #FFFFFF !important; color: #1A2B3C !important; }
+    [data-testid="stFileUploaderFile"] span { color: #1A2B3C !important; }
+    [data-testid="stFileUploaderFile"] small { color: #5A6B7D !important; }
+
+    /* Toggle / checkbox / radio */
     [data-testid="stToggle"] label span { color: #1A2B3C !important; }
-    /* Alerts */
+    .stCheckbox label span, .stRadio label div { color: #1A2B3C !important; }
+    [data-testid="stCheckbox"] label span { color: #1A2B3C !important; }
+    .stRadio > div > label > div { color: #1A2B3C !important; }
+
+    /* Alerts / info / success / warning / error boxes */
     [data-testid="stAlert"] { color: #1A2B3C !important; }
+    [data-testid="stAlert"] p { color: inherit !important; }
+    .stSuccess, .stInfo, .stWarning, .stError { color: #1A2B3C !important; }
+
+    /* Spinner / progress */
+    .stSpinner > div { color: #5A6B7D !important; }
+
     /* Dividers */
     hr { border-color: #DEE2E6 !important; }
+
     /* Plotly chart containers */
     [data-testid="stPlotlyChart"] { background-color: #FFFFFF !important; }
+
+    /* Tooltip / popover */
+    [data-testid="stTooltipContent"] { background-color: #FFFFFF !important; color: #1A2B3C !important; }
+
+    /* Bottom page padding area */
+    .reportview-container .main footer { background-color: #FFFFFF !important; }
+    footer { background-color: #FFFFFF !important; color: #5A6B7D !important; }
+    footer a { color: #0052CC !important; }
+
+    /* Scrollbar for light theme */
+    ::-webkit-scrollbar { background: #F4F6F9; width: 8px; }
+    ::-webkit-scrollbar-thumb { background: #C4CDD5; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #8896A6; }
     .stApp { font-family:'Inter',system-ui,-apple-system,sans-serif; }
     /* Header */
     .main-header { background:#FFFFFF; padding:1.8rem 2.2rem; border-radius:12px; margin-bottom:1rem;
