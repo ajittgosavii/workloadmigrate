@@ -27,6 +27,23 @@ from pricing_engine import (
     check_aws_connectivity, check_azure_connectivity, check_anthropic_connectivity,
 )
 from recommendation_engine import get_ai_recommendation, get_batch_ai_summary
+from validation import validate_server_inputs, validate_bulk_dataframe
+from scenario_engine import (
+    run_sensitivity_analysis, calculate_roi_breakeven,
+    project_costs, generate_wave_plan,
+)
+from currency_converter import (
+    get_supported_currencies, get_symbol, get_multiplier,
+    fetch_live_rates, CURRENCY_SYMBOLS, FALLBACK_RATES,
+)
+from auth import AuthManager, render_login_page, ai_rate_limiter
+from audit_logger import AuditLogger
+from discovery import discover_aws_ec2, discover_azure_vms, discover_servicenow_cmdb
+from monitoring import metrics
+from pricing_cache import pricing_cache
+from pdf_report import generate_pdf_report
+from run_history import RunHistory
+from retry_utils import get_circuit_breaker_status
 
 
 def render_ai_analysis(text: str, title: str = "Claude AI Analysis"):
@@ -264,9 +281,18 @@ with st.sidebar:
     st.markdown("**📊 Display**")
     show_charts = st.toggle("Show Charts", value=True)
     show_ai = st.toggle("AI Recommendations", value=True)
-    currency = st.selectbox("Currency", ["USD ($)", "CAD (C$)", "EUR (€)", "GBP (£)"])
-    cmult = {"USD ($)": 1.0, "CAD (C$)": 1.38, "EUR (€)": 0.92, "GBP (£)": 0.79}[currency]
-    csym = {"USD ($)": "$", "CAD (C$)": "C$", "EUR (€)": "€", "GBP (£)": "£"}[currency]
+    show_enhanced = st.toggle("Enhanced Analysis", value=True, help="Network, DR/Backup, Storage Tiers, Serverless")
+    # Enhanced currency support with 20 currencies
+    currency_options = ["USD ($)", "CAD (C$)", "EUR (€)", "GBP (£)", "AUD (A$)",
+                        "JPY (¥)", "INR (₹)", "SGD (S$)", "CHF (CHF)",
+                        "SEK (kr)", "NZD (NZ$)", "BRL (R$)", "MXN (MX$)",
+                        "KRW (₩)", "HKD (HK$)", "AED (AED)", "ZAR (R)"]
+    currency = st.selectbox("Currency", currency_options)
+    currency_code = currency.split(" ")[0]
+    # Try live rates, fallback to static
+    _rates, _rates_live, _rates_msg = fetch_live_rates()
+    cmult = get_multiplier(currency_code, _rates)
+    csym = get_symbol(currency_code)
     st.markdown("---")
     st.markdown("**🔒 Compliance**")
     st.caption("✅ Zero server-side data storage\n✅ In-memory computation only\n✅ Session cleared on browser close\n✅ Export generates fresh file\n✅ API key via secrets.toml (encrypted)")
@@ -777,11 +803,88 @@ def render_single_output(inputs: Dict, outputs: Dict):
             fig_g.update_layout(template="plotly_dark", height=350, paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_g, use_container_width=True)
 
+    # ── ENHANCED ANALYSIS SECTIONS ────────────────────────────────────────
+    if show_enhanced:
+        net = outputs.get("network_costs", {})
+        drb = outputs.get("dr_backup_costs", {})
+        st_tiers = outputs.get("storage_tiers", {})
+        modern = outputs.get("modern_options", {})
+
+        # Network Costs
+        if net and net.get("total_monthly", 0) > 0:
+            st.markdown('<div class="section-header">🌐 Network & Egress Costs</div>', unsafe_allow_html=True)
+            nc1, nc2, nc3 = st.columns(3)
+            with nc1:
+                mc("Egress Cost", fp(net.get("egress", {}).get("monthly_cost", 0)) + "/mo",
+                   f"~{net.get('estimated_egress_gb_month', 0):.0f} GB/mo egress")
+            with nc2:
+                mc("VPN/Connectivity", fp(net.get("vpn", {}).get("monthly_cost", 0)) + "/mo",
+                   net.get("vpn", {}).get("type", ""), "metric-blue")
+            with nc3:
+                mc("Total Network", fp(net.get("total_monthly", 0)) + "/mo",
+                   fp(net.get("total_annual", 0)) + "/yr", "metric-yellow")
+
+        # DR & Backup
+        if drb and drb.get("combined_monthly", 0) > 0:
+            st.markdown('<div class="section-header">🛡️ DR & Backup Costs</div>', unsafe_allow_html=True)
+            dr1, dr2, dr3 = st.columns(3)
+            with dr1:
+                mc("Backup", fp(drb.get("backup", {}).get("total_monthly", 0)) + "/mo",
+                   f"{drb.get('backup', {}).get('total_backup_storage_gb', 0):.0f} GB stored")
+            with dr2:
+                dr_data = drb.get("dr", {})
+                mc("Disaster Recovery", fp(dr_data.get("total_monthly", 0)) + "/mo",
+                   f"{dr_data.get('strategy_label', 'Pilot Light')} (RTO: {dr_data.get('rto', 'N/A')})", "metric-blue")
+            with dr3:
+                mc("Combined DR+Backup", fp(drb.get("combined_monthly", 0)) + "/mo",
+                   fp(drb.get("combined_annual", 0)) + "/yr", "metric-red")
+
+        # Storage Tier Optimization
+        if st_tiers and st_tiers.get("savings_pct", 0) > 0:
+            st.markdown('<div class="section-header">💾 Storage Tier Optimization</div>', unsafe_allow_html=True)
+            so1, so2 = st.columns(2)
+            with so1:
+                mc("Current (Single Tier)", fp(st_tiers.get("single_tier_monthly", 0)) + "/mo",
+                   "All storage on hot tier", "metric-red")
+            with so2:
+                mc("Optimized (Tiered)", fp(st_tiers.get("optimized_monthly", 0)) + "/mo",
+                   f"Save {st_tiers.get('savings_pct', 0):.0f}% ({fp(st_tiers.get('savings_monthly', 0))}/mo)")
+            st.caption(st_tiers.get("recommendation", ""))
+
+        # Serverless/Container Options
+        if modern and modern.get("recommended", "N/A") != "N/A":
+            st.markdown('<div class="section-header">🚀 Modern Deployment Options</div>', unsafe_allow_html=True)
+            sl = modern.get("serverless", {})
+            ct = modern.get("container", {})
+            mo1, mo2, mo3 = st.columns(3)
+            with mo1:
+                if sl.get("suitable"):
+                    mc("Serverless", fp(sl.get("monthly_cost", 0)) + "/mo",
+                       f"{sl.get('service', '')} | {sl.get('estimated_requests_month', 0):,.0f} req/mo")
+                else:
+                    mc("Serverless", "N/A", sl.get("reason", "Not suitable"), "metric-red")
+            with mo2:
+                mc("Container", fp(ct.get("monthly_cost", 0)) + "/mo",
+                   f"{ct.get('service', '')} | {ct.get('container_vcpu', 0)} vCPU", "metric-blue")
+            with mo3:
+                mc("Recommended", fp(modern.get("recommended_monthly", 0)) + "/mo",
+                   modern.get("recommended", ""), "metric-yellow")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TABS
+# INITIALIZE SESSION UTILITIES
 # ═══════════════════════════════════════════════════════════════════════════════
-tab_upload, tab_manual, tab_results = st.tabs(["📁 Upload File", "✏️ Manual Input", "📊 Batch Results"])
+audit = AuditLogger(st.session_state)
+run_hist = RunHistory(st.session_state)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABS — Now with enhanced features
+# ═══════════════════════════════════════════════════════════════════════════════
+tab_upload, tab_manual, tab_results, tab_scenarios, tab_discovery, tab_monitor = st.tabs([
+    "📁 Upload File", "✏️ Manual Input", "📊 Batch Results",
+    "🔄 Scenarios & Projections", "🔍 Auto-Discovery", "📡 Monitoring"
+])
 
 # ── TAB 1: UPLOAD with STREAMING RESULTS ─────────────────────────────────────
 with tab_upload:
@@ -814,6 +917,16 @@ with tab_upload:
             df = pd.read_csv(uploaded) if uploaded.name.endswith('.csv') else pd.read_excel(uploaded)
             n_rows = len(df)
             st.success(f"✅ Loaded **{n_rows} servers** (in-memory only, not stored)")
+
+            # ── ENHANCED: Bulk data validation ──
+            validation = validate_bulk_dataframe(df)
+            if not validation.is_valid:
+                for err in validation.errors:
+                    st.error(err)
+            if validation.warnings:
+                with st.expander(f"⚠️ {len(validation.warnings)} validation warning(s)", expanded=False):
+                    for warn in validation.warnings:
+                        st.warning(warn)
 
             if n_rows > 1000:
                 st.warning(f"⚡ **Large dataset ({n_rows:,} rows).** Catalog pricing used for bulk. "
@@ -939,10 +1052,23 @@ with tab_manual:
             "total_storage_gb": m_stor, "storage_usage_pct": m_spct,
             "avg_network_throughput": m_net, "total_network_throughput": m_tnet, "avg_disk_iops": m_iops,
         }
-        with st.spinner("Computing…"):
-            out = calculate_all_outputs(inp)
-        st.session_state["_m_inp"] = inp
-        st.session_state["_m_out"] = out
+        # ── ENHANCED: Input validation ──
+        validation = validate_server_inputs(inp)
+        if validation.warnings:
+            for w in validation.warnings:
+                st.warning(w)
+        if not validation.is_valid:
+            for e in validation.errors:
+                st.error(e)
+        else:
+            with st.spinner("Computing…"):
+                import time as _t; _start = _t.time()
+                out = calculate_all_outputs(inp)
+                metrics.record_timing("analysis.single", (_t.time() - _start) * 1000)
+                metrics.increment_counter("analysis.total_servers")
+            audit.log_analysis("user", "analyst", 1, m_cloud, "manual")
+            st.session_state["_m_inp"] = inp
+            st.session_state["_m_out"] = out
 
     if "_m_out" in st.session_state:
         inp, out = st.session_state["_m_inp"], st.session_state["_m_out"]
@@ -959,7 +1085,7 @@ with tab_manual:
 
         st.markdown('<div class="section-header">📥 Export</div>', unsafe_allow_html=True)
         results = [{"inputs": inp, "outputs": out}]
-        ce1, ce2 = st.columns(2)
+        ce1, ce2, ce3 = st.columns(3)
         with ce1:
             st.download_button("📥 Download Excel", generate_excel(results),
                 f"{inp.get('host_name','server')}_analysis.xlsx",
@@ -967,6 +1093,10 @@ with tab_manual:
         with ce2:
             st.download_button("📥 Download CSV", generate_csv(results),
                 f"{inp.get('host_name','server')}_analysis.csv", "text/csv")
+        with ce3:
+            pdf_data = generate_pdf_report(results, currency_symbol=csym, currency_multiplier=cmult)
+            st.download_button("📥 Download PDF", pdf_data,
+                f"{inp.get('host_name','server')}_report.pdf", "application/pdf", key="pdf_single")
 
 
 # ── TAB 3: BATCH RESULTS ────────────────────────────────────────────────────
@@ -1087,11 +1217,54 @@ with tab_results:
                     s = get_batch_ai_summary(results, api_key)
                 render_ai_analysis(s, "Executive Portfolio Analysis")
 
+        # ── ENHANCED: Migration Wave Plan ────────────────────────────────────
+        if show_enhanced:
+            st.markdown('<div class="section-header">📋 Migration Wave Plan</div>', unsafe_allow_html=True)
+            wave_plan = generate_wave_plan(results)
+            for wave_key in ["wave_1", "wave_2", "wave_3", "wave_4"]:
+                wave = wave_plan["waves"][wave_key]
+                with st.expander(
+                    f"**{wave['name']}** ({wave['timeline']}) — {wave['count']} servers "
+                    f"| Savings: {fp(wave['total_savings'])}/yr",
+                    expanded=(wave_key == "wave_1")
+                ):
+                    st.caption(f"Criteria: {wave['criteria']}")
+                    if wave["servers"]:
+                        wdf = pd.DataFrame(wave["servers"])[["host_name", "environment", "server_type",
+                                                              "migration_type", "on_prem_cost", "cloud_cost"]]
+                        wdf.columns = ["Host", "Env", "Type", "Migration", "On-Prem/yr", "Cloud/yr"]
+                        st.dataframe(wdf, use_container_width=True, height=min(200, 35 + len(wave["servers"]) * 35))
+                    else:
+                        st.caption("No servers assigned to this wave.")
+
+            # ROI Break-even for portfolio
+            st.markdown('<div class="section-header">📈 Portfolio ROI & Break-Even</div>', unsafe_allow_html=True)
+            roi = calculate_roi_breakeven(t_op, t_best, server_count=n)
+            roi1, roi2, roi3, roi4 = st.columns(4)
+            with roi1:
+                mc("Migration Investment", fp(roi["migration_cost"]), f"{n} servers")
+            with roi2:
+                mc("Monthly Savings", fp(roi["monthly_savings"]), "After migration")
+            with roi3:
+                be = roi.get("breakeven_months")
+                mc("Break-Even", f"{be} months" if be else "N/A",
+                   "Cloud costs more" if not be else "")
+            with roi4:
+                mc("3-Year Savings", fp(roi["three_year_savings"]),
+                   f"ROI: {roi.get('three_year_roi_pct', 0):.0f}%")
+
+        # ── ENHANCED: Snapshot saving ────────────────────────────────────
+        with st.expander("💾 Save Snapshot for Comparison", expanded=False):
+            snap_label = st.text_input("Snapshot label", value=f"Analysis {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", key="snap_label")
+            if st.button("Save Snapshot", key="save_snap"):
+                snap_id = run_hist.save_snapshot(snap_label, results)
+                st.success(f"Snapshot saved: **{snap_label}** (ID: {snap_id})")
+
         # Export
         st.markdown('<div class="section-header">📥 Export Portfolio</div>', unsafe_allow_html=True)
         if n > 1000:
             st.info(f"💡 **{n:,} rows**: CSV recommended (~1-2s). Excel may take ~{n*2//1000}s.")
-        ex1, ex2 = st.columns(2)
+        ex1, ex2, ex3 = st.columns(3)
         with ex1:
             st.download_button(f"📥 CSV {'(Recommended)' if n > 1000 else ''}", generate_csv(results),
                 f"migration_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", "text/csv", key="b_csv")
@@ -1107,3 +1280,320 @@ with tab_results:
                 st.download_button("📥 Excel", generate_excel(results),
                     f"migration_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="b_xlsx")
+        with ex3:
+            pdf_data = generate_pdf_report(results, currency_symbol=csym, currency_multiplier=cmult)
+            st.download_button("📥 PDF Report", pdf_data,
+                f"migration_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                "application/pdf", key="b_pdf")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4: SCENARIOS & PROJECTIONS
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_scenarios:
+    st.markdown('<div class="section-header">🔄 Scenario Analysis & Financial Projections</div>', unsafe_allow_html=True)
+
+    # ── What-If Sensitivity Analysis ──
+    st.markdown("#### 📊 What-If Sensitivity Analysis")
+    if "_m_out" in st.session_state:
+        inp_s, out_s = st.session_state["_m_inp"], st.session_state["_m_out"]
+        st.info(f"Running sensitivity for: **{inp_s.get('host_name', 'Manual Server')}**")
+
+        if st.button("Run Sensitivity Analysis", type="primary", key="run_sensitivity"):
+            with st.spinner("Computing scenarios..."):
+                sensitivity = run_sensitivity_analysis(inp_s, out_s, calculate_all_outputs)
+
+            for var, data in sensitivity.items():
+                with st.expander(f"**{var}** (base: {data['base_value']})", expanded=False):
+                    rows = []
+                    for s in data["scenarios"]:
+                        rows.append({
+                            "Variation": f"{s['variation_pct']:+d}%",
+                            "Value": s["new_value"],
+                            "Instance": s["instance_type"],
+                            f"AWS Annual ({csym})": round(s["aws_annual"] * cmult, 2),
+                            f"Azure Annual ({csym})": round(s["azure_annual"] * cmult, 2),
+                            f"On-Prem Annual ({csym})": round(s["on_prem_annual"] * cmult, 2),
+                        })
+                    if rows:
+                        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    else:
+        st.caption("Analyze a server in **Manual Input** tab first to run sensitivity analysis.")
+
+    st.markdown("---")
+
+    # ── Cost Projections ──
+    st.markdown("#### 📈 3-5 Year Cost Projection")
+    if "_m_out" in st.session_state:
+        inp_p, out_p = st.session_state["_m_inp"], st.session_state["_m_out"]
+        proj_years = st.slider("Projection years", 3, 7, 5, key="proj_yr")
+
+        best_cloud = min(
+            out_p["cross_provider"]["AWS"]["annual_3yr_ri"],
+            out_p["cross_provider"]["Azure"]["annual_3yr_ri"],
+        )
+        roi = calculate_roi_breakeven(
+            out_p["on_prem_yearly_cost"], best_cloud,
+            inp_p.get("migration_type", "Rehost"),
+            inp_p.get("databases_caches", "None"),
+        )
+        projection = project_costs(
+            out_p["on_prem_yearly_cost"], best_cloud,
+            out_p.get("on_prem_breakdown", {}),
+            years=proj_years, migration_cost=roi["migration_cost"],
+        )
+
+        # Projection chart
+        fig_proj = go.Figure()
+        years = [p["year"] for p in projection["on_prem"]]
+        fig_proj.add_trace(go.Scatter(
+            x=years, y=[p["annual_cost"] * cmult for p in projection["on_prem"]],
+            name="On-Premises", mode="lines+markers", line=dict(color="#FF6B6B", width=3),
+        ))
+        fig_proj.add_trace(go.Scatter(
+            x=years, y=[p["annual_cost"] * cmult for p in projection["cloud"]],
+            name="Cloud", mode="lines+markers", line=dict(color="#00D4AA", width=3),
+        ))
+        fig_proj.update_layout(
+            title=f"{proj_years}-Year Cost Projection",
+            xaxis_title="Year", yaxis_title=f"Annual Cost ({csym})",
+            template="plotly_dark", height=400,
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(fig_proj, use_container_width=True)
+
+        # ROI metrics
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            mc("Migration Cost", fp(roi["migration_cost"]),
+               f"Break-even: {roi.get('breakeven_months', 'N/A')} months")
+        with r2:
+            mc(f"{proj_years}-Year Total Savings", fp(projection["total_savings"]),
+               f"{projection['total_savings_pct']:.1f}% cheaper than on-prem")
+        with r3:
+            mc("3-Year ROI", f"{roi.get('three_year_roi_pct', 0):.0f}%",
+               fp(roi.get("three_year_savings", 0)) + " net savings")
+    else:
+        st.caption("Analyze a server in **Manual Input** tab first.")
+
+    st.markdown("---")
+
+    # ── Historical Comparison ──
+    st.markdown("#### 🕐 Historical Run Comparison")
+    snapshots = run_hist.get_snapshots()
+    if len(snapshots) >= 2:
+        snap_labels = {s["id"]: f"{s['label']} ({s['timestamp'][:16]})" for s in snapshots}
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            snap_a = st.selectbox("Snapshot A", list(snap_labels.keys()),
+                                  format_func=lambda x: snap_labels[x], key="snap_a")
+        with sc2:
+            snap_b = st.selectbox("Snapshot B", list(snap_labels.keys()),
+                                  format_func=lambda x: snap_labels[x], index=1, key="snap_b")
+        if snap_a != snap_b and st.button("Compare Snapshots", key="compare_snap"):
+            comparison = run_hist.compare_snapshots(snap_a, snap_b)
+            if comparison:
+                cc1, cc2, cc3 = st.columns(3)
+                with cc1:
+                    mc("Servers Changed", str(comparison["server_count"]["changed"]),
+                       f"Added: {comparison['server_count']['added']} | Removed: {comparison['server_count']['removed']}")
+                with cc2:
+                    d = comparison["totals"]["savings"]
+                    mc("Savings Delta", fp(d["delta"]),
+                       f"{d['delta_pct']:+.1f}%", "" if d["delta"] >= 0 else "metric-red")
+                with cc3:
+                    d = comparison["totals"]["on_prem"]
+                    mc("On-Prem Delta", fp(d["delta"]),
+                       f"{d['delta_pct']:+.1f}%")
+    elif len(snapshots) == 1:
+        st.caption("Save at least 2 snapshots from **Batch Results** to compare.")
+    else:
+        st.caption("No snapshots saved yet. Run a batch analysis and save a snapshot.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5: AUTO-DISCOVERY
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_discovery:
+    st.markdown('<div class="section-header">🔍 Server Auto-Discovery</div>', unsafe_allow_html=True)
+    st.caption("Automatically discover servers from cloud providers, on-prem systems, or CMDB.")
+
+    disc_source = st.selectbox("Discovery Source", [
+        "AWS EC2", "Azure VMs", "ServiceNow CMDB",
+    ], key="disc_src")
+
+    if disc_source == "AWS EC2":
+        st.markdown("##### AWS EC2 Discovery")
+        dc1, dc2 = st.columns(2)
+        with dc1:
+            aws_region = st.selectbox("AWS Region", list(AWS_REGIONS.values()), key="disc_aws_r")
+            aws_key = st.text_input("Access Key ID", type="password", key="disc_aws_k")
+        with dc2:
+            aws_secret = st.text_input("Secret Access Key", type="password", key="disc_aws_s")
+            aws_profile = st.text_input("Or AWS Profile Name", placeholder="default", key="disc_aws_p")
+
+        if st.button("Discover EC2 Instances", type="primary", key="disc_aws_go"):
+            with st.spinner("Discovering AWS EC2 instances..."):
+                result = discover_aws_ec2(
+                    aws_region,
+                    access_key=aws_key if aws_key else None,
+                    secret_key=aws_secret if aws_secret else None,
+                    profile_name=aws_profile if aws_profile else None,
+                )
+            if result.success:
+                st.success(result.message)
+                if result.servers:
+                    df_disc = pd.DataFrame(result.servers)
+                    display_cols = [c for c in df_disc.columns if not c.startswith("_")]
+                    st.dataframe(df_disc[display_cols], use_container_width=True)
+                    st.session_state["_discovered"] = result.servers
+            else:
+                st.error(result.message)
+                for err in result.errors:
+                    st.error(err)
+
+    elif disc_source == "Azure VMs":
+        st.markdown("##### Azure VM Discovery")
+        az_sub = st.text_input("Azure Subscription ID", key="disc_az_sub",
+                               help="Or set AZURE_SUBSCRIPTION_ID environment variable")
+        if st.button("Discover Azure VMs", type="primary", key="disc_az_go"):
+            with st.spinner("Discovering Azure VMs..."):
+                result = discover_azure_vms(subscription_id=az_sub if az_sub else None)
+            if result.success:
+                st.success(result.message)
+                if result.servers:
+                    df_disc = pd.DataFrame(result.servers)
+                    display_cols = [c for c in df_disc.columns if not c.startswith("_")]
+                    st.dataframe(df_disc[display_cols], use_container_width=True)
+                    st.session_state["_discovered"] = result.servers
+            else:
+                st.error(result.message)
+                for err in result.errors:
+                    st.error(err)
+
+    elif disc_source == "ServiceNow CMDB":
+        st.markdown("##### ServiceNow CMDB Discovery")
+        sn1, sn2 = st.columns(2)
+        with sn1:
+            sn_url = st.text_input("Instance URL", placeholder="https://instance.service-now.com", key="disc_sn_url")
+            sn_user = st.text_input("Username", key="disc_sn_user")
+        with sn2:
+            sn_pass = st.text_input("Password", type="password", key="disc_sn_pass")
+            sn_limit = st.number_input("Max servers", 10, 5000, 500, key="disc_sn_limit")
+
+        if st.button("Discover from CMDB", type="primary", key="disc_sn_go"):
+            if not sn_url or not sn_user or not sn_pass:
+                st.error("Please provide URL, username, and password.")
+            else:
+                with st.spinner("Querying ServiceNow CMDB..."):
+                    result = discover_servicenow_cmdb(sn_url, sn_user, sn_pass, limit=sn_limit)
+                if result.success:
+                    st.success(result.message)
+                    if result.servers:
+                        df_disc = pd.DataFrame(result.servers)
+                        display_cols = [c for c in df_disc.columns if not c.startswith("_")]
+                        st.dataframe(df_disc[display_cols], use_container_width=True)
+                        st.session_state["_discovered"] = result.servers
+                else:
+                    st.error(result.message)
+
+    # Use discovered servers
+    if "_discovered" in st.session_state:
+        st.markdown("---")
+        disc_servers = st.session_state["_discovered"]
+        st.success(f"**{len(disc_servers)} servers** ready for analysis")
+        if st.button("Analyze Discovered Servers", type="primary", key="analyze_disc"):
+            st.info("Switch to **Upload File** tab and the discovered servers will be available.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6: MONITORING & HEALTH
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_monitor:
+    st.markdown('<div class="section-header">📡 Application Monitoring</div>', unsafe_allow_html=True)
+
+    # Health status
+    health = metrics.get_health_status()
+    h_color = {"healthy": "", "degraded": "metric-yellow", "unhealthy": "metric-red"}
+    h1, h2, h3, h4 = st.columns(4)
+    with h1:
+        mc("Status", health["status"].upper(), f"Error rate: {health['error_rate']}%",
+           h_color.get(health["status"], ""))
+    with h2:
+        mc("Uptime", health["uptime"], "Since session start")
+    with h3:
+        mc("Total Operations", str(health["total_operations"]))
+    with h4:
+        mc("Active Alerts", str(health["active_alerts"]),
+           "" if health["active_alerts"] == 0 else "Check below", "metric-red" if health["active_alerts"] > 0 else "")
+
+    # Circuit breaker status
+    st.markdown("##### Circuit Breaker Status")
+    cb_status = get_circuit_breaker_status()
+    cb_cols = st.columns(len(cb_status))
+    for i, (name, status) in enumerate(cb_status.items()):
+        with cb_cols[i]:
+            state = status["state"]
+            is_ok = status["is_available"]
+            mc(name.replace("_", " ").title(),
+               state.upper(),
+               f"Failures: {status['failures']}/{status['threshold']}",
+               "" if is_ok else "metric-red")
+
+    # Cache stats
+    st.markdown("##### Pricing Cache")
+    cache_stats = pricing_cache.get_stats()
+    cs1, cs2, cs3, cs4 = st.columns(4)
+    with cs1:
+        mc("Cache Size", f"{cache_stats['active']}/{cache_stats['max_size']}")
+    with cs2:
+        mc("Hit Rate", f"{cache_stats['hit_rate_pct']}%",
+           f"Hits: {cache_stats['hits']} | Misses: {cache_stats['misses']}")
+    with cs3:
+        mc("Evictions", str(cache_stats["evictions"]))
+    with cs4:
+        if st.button("Clear Cache", key="clear_cache"):
+            pricing_cache.invalidate()
+            st.success("Cache cleared")
+            st.rerun()
+
+    # Performance metrics
+    dashboard = metrics.get_dashboard()
+    st.markdown("##### API Performance")
+    api_data = dashboard.get("api_metrics", {})
+    for api_name, stats in api_data.items():
+        if stats["count"] > 0:
+            st.caption(f"**{api_name}**: {stats['count']} calls | "
+                       f"Avg: {stats['avg']:.0f}ms | P95: {stats['p95']:.0f}ms | "
+                       f"Last: {stats['last']:.0f}ms")
+
+    # Analysis metrics
+    st.markdown("##### Analysis Throughput")
+    an_data = dashboard.get("analysis_metrics", {})
+    am1, am2 = st.columns(2)
+    with am1:
+        mc("Total Servers Analyzed", str(an_data.get("total_analyzed", 0)))
+    with am2:
+        single_stats = an_data.get("single_server", {})
+        mc("Avg Analysis Time", f"{single_stats.get('avg', 0):.0f}ms" if single_stats.get("count", 0) > 0 else "N/A")
+
+    # Audit log
+    st.markdown("##### Audit Log")
+    audit_summary = audit.get_summary()
+    if audit_summary["total_events"] > 0:
+        st.caption(f"Total events: {audit_summary['total_events']} | "
+                   f"Categories: {', '.join(f'{k}: {v}' for k, v in audit_summary.get('by_category', {}).items())}")
+        with st.expander("View Audit Entries", expanded=False):
+            entries = audit.get_entries(limit=50)
+            if entries:
+                st.dataframe(pd.DataFrame(entries), use_container_width=True, height=300)
+
+        ae1, ae2 = st.columns(2)
+        with ae1:
+            st.download_button("📥 Export Audit CSV", audit.export_csv(),
+                               "audit_log.csv", "text/csv", key="audit_csv")
+        with ae2:
+            st.download_button("📥 Export Audit JSON", audit.export_json(),
+                               "audit_log.json", "application/json", key="audit_json")
+    else:
+        st.caption("No audit events recorded in this session.")

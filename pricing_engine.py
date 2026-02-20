@@ -14,7 +14,15 @@ Regional multipliers are applied dynamically based on selected region.
 
 import requests
 import math
+import time
 from typing import Dict, List, Optional, Tuple
+
+from retry_utils import resilient_request, get_circuit_breaker
+from pricing_cache import pricing_cache
+from network_costs import calculate_network_costs, estimate_migration_transfer_cost
+from dr_backup import calculate_total_dr_backup
+from storage_optimizer import calculate_tiered_storage_cost
+from serverless_pricing import calculate_all_modern_options
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGION MAPS — used only for API query parameters
@@ -42,7 +50,17 @@ AZURE_REGIONS = {
 # LIVE PRICING — Azure Retail Prices API
 # ═══════════════════════════════════════════════════════════════════════════════
 def fetch_azure_vm_pricing(region_code: str, vcpu_needed: int, mem_needed: float) -> List[Dict]:
-    """Query Azure Retail Prices API for VM pricing. Returns matched SKUs."""
+    """Query Azure Retail Prices API for VM pricing with retry & caching."""
+    # Check cache first
+    cache_params = {"region": region_code, "vcpu": vcpu_needed, "mem": mem_needed}
+    cached, hit = pricing_cache.get("azure_vm_pricing", cache_params)
+    if hit:
+        return cached
+
+    cb = get_circuit_breaker("azure_pricing")
+    if not cb.can_execute():
+        return []
+
     results = []
     try:
         families = ["Standard_D", "Standard_E", "Standard_F"]
@@ -54,22 +72,36 @@ def fetch_azure_vm_pricing(region_code: str, vcpu_needed: int, mem_needed: float
                 f"and priceType eq 'Consumption' "
                 f"and contains(armSkuName, '{fam}')"
             )
-            resp = requests.get(url, params={"$filter": odata, "currencyCode": "USD", "$top": 20}, timeout=12)
-            if resp.status_code == 200:
-                for item in resp.json().get("Items", []):
-                    if item.get("type") == "Consumption" and "Windows" not in item.get("productName", ""):
-                        sku = item.get("armSkuName", "")
-                        vcpu, mem = _parse_azure_sku(sku)
-                        if vcpu >= vcpu_needed and mem >= mem_needed:
-                            results.append({"type": sku, "vcpu": vcpu, "memory": mem,
-                                            "price_hr": item.get("retailPrice", 0), "source": "azure_api_live"})
+            try:
+                resp = resilient_request(
+                    url, params={"$filter": odata, "currencyCode": "USD", "$top": 20},
+                    timeout=12, max_retries=2, circuit_breaker_name="azure_pricing"
+                )
+                if resp.status_code == 200:
+                    for item in resp.json().get("Items", []):
+                        if item.get("type") == "Consumption" and "Windows" not in item.get("productName", ""):
+                            sku = item.get("armSkuName", "")
+                            vcpu, mem = _parse_azure_sku(sku)
+                            if vcpu >= vcpu_needed and mem >= mem_needed:
+                                results.append({"type": sku, "vcpu": vcpu, "memory": mem,
+                                                "price_hr": item.get("retailPrice", 0), "source": "azure_api_live"})
+            except Exception:
+                continue
+        cb.record_success()
     except Exception:
-        pass
+        cb.record_failure()
+
     seen = {}
     for r in results:
         if r["type"] not in seen or r["price_hr"] < seen[r["type"]]["price_hr"]:
             seen[r["type"]] = r
-    return sorted(seen.values(), key=lambda x: (x["vcpu"], x["memory"], x["price_hr"]))
+    sorted_results = sorted(seen.values(), key=lambda x: (x["vcpu"], x["memory"], x["price_hr"]))
+
+    # Cache the results
+    if sorted_results:
+        pricing_cache.put("azure_vm_pricing", cache_params, sorted_results, ttl=1800)
+
+    return sorted_results
 
 
 def fetch_azure_storage_pricing(region_code: str) -> Dict[str, float]:
@@ -714,6 +746,58 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
             "annual_3yr_ri": xannual,
         }
 
+    # ── ENHANCED: Network/Egress costs ──────────────────────────────────────
+    avg_net = float(inputs.get("avg_network_throughput", 100))
+    total_net = float(inputs.get("total_network_throughput", 1000))
+    server_type = str(inputs.get("server_type", "Application Server"))
+
+    try:
+        network = calculate_network_costs(
+            pricing_cloud, avg_net, total_net, server_type,
+            needs_vpn=True, needs_load_balancer=False,
+        )
+    except Exception:
+        network = {"total_monthly": 0, "total_annual": 0, "egress": {"monthly_cost": 0}}
+
+    # ── ENHANCED: DR & Backup costs ──────────────────────────────────────
+    environment = str(inputs.get("environment", "Production"))
+    try:
+        dr_backup = calculate_total_dr_backup(
+            pricing_cloud, rec_od, total_storage, storage_pct,
+            server_type, environment, databases,
+        )
+    except Exception:
+        dr_backup = {"combined_monthly": 0, "combined_annual": 0,
+                     "backup": {"total_monthly": 0}, "dr": {"total_monthly": 0}}
+
+    # ── ENHANCED: Storage tier optimization ───────────────────────────────
+    try:
+        storage_tiers = calculate_tiered_storage_cost(
+            pricing_cloud, total_storage, storage_pct, avg_iops,
+            server_type, databases, rmult,
+        )
+    except Exception:
+        storage_tiers = {"optimized_monthly": sprice, "savings_monthly": 0, "savings_pct": 0}
+
+    # ── ENHANCED: Serverless/Container options ───────────────────────────
+    try:
+        modern_options = calculate_all_modern_options(
+            pricing_cloud, vcpu_count, avg_cpu, memory_gb,
+            float(inputs.get("avg_memory_usage", 50)),
+            server_type, str(inputs.get("instance_usage", "24x7")), rmult,
+        )
+    except Exception:
+        modern_options = {"recommended": "N/A", "recommended_monthly": 0,
+                         "serverless": {"suitable": False}, "container": {"monthly_cost": 0}}
+
+    # ── ENHANCED: Migration transfer cost ────────────────────────────────
+    try:
+        migration_transfer = estimate_migration_transfer_cost(
+            pricing_cloud, total_storage, storage_pct,
+        )
+    except Exception:
+        migration_transfer = {"data_to_transfer_gb": 0, "methods": []}
+
     return {
         "right_sizing_cpu": rs_cpu, "right_sizing_memory": rs_mem, "right_sizing_storage": rs_stor,
         "iaas_on_demand_price": iaas_od, "iaas_reserved_1yr_price": iaas_1y,
@@ -732,6 +816,12 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
         "azure_local": azl,
         "cross_provider": xp,
         "target_operating_system": determine_target_os(os_name, os_eol),
+        # Enhanced outputs
+        "network_costs": network,
+        "dr_backup_costs": dr_backup,
+        "storage_tiers": storage_tiers,
+        "modern_options": modern_options,
+        "migration_transfer": migration_transfer,
         "_cloud_provider": cloud, "_instance_family": family, "_region": region,
         "_hostname": str(inputs.get("host_name", "")), "_pricing_source": pricing_source,
     }
