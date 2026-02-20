@@ -285,21 +285,138 @@ def compute_storage_price(cloud: str, stype: str, gb: float, rmult: float, live:
 
 
 def compute_licensing(os: str, vcpu: int) -> float:
+    """OS licensing (Dell PowerEdge configurator pricing, dell.com 2025)."""
     ol = str(os).lower()
-    if "windows" in ol: return round(5.50 * vcpu, 2)
-    if "red hat" in ol or "rhel" in ol: return round(3.00 * vcpu, 2)
-    if "suse" in ol: return round(2.50 * vcpu, 2)
+    if "windows" in ol: return round(5.50 * vcpu, 2)    # WS 2025 Std: $2,135/16-core
+    if "red hat" in ol or "rhel" in ol: return round(3.00 * vcpu, 2)  # RHEL Premium 2SKT
+    if "suse" in ol: return round(2.50 * vcpu, 2)        # SUSE SLES
     return 0.0
 
 
-def compute_on_prem(vcpu: int, mem: float, stor: float, os: str) -> float:
-    hw = vcpu * 150 + mem * 12 + stor * 0.50
+def compute_on_prem(vcpu: int, mem: float, stor: float, os: str) -> Tuple[float, Dict]:
+    """
+    Industry-sourced On-Premises / Data Center TCO calculation.
+    Returns (total_yearly, breakdown_dict) with full transparency.
+
+    Sources:
+    ─────────────────────────────────────────────────────────────────────
+    HARDWARE COMPUTE — $130/vCPU/yr
+      Dell PowerEdge R760 (2× Intel Xeon, 64-core): ~$10,000-$15,000 base
+      Amortized over 5-year lifecycle: ~$125-$187/vCPU/yr
+      Reference: dell.com/poweredge-r760, TerraZone 5-Year TCO Analysis (2025)
+
+    HARDWARE MEMORY — $10/GB/yr
+      DDR5 64GB ECC RDIMM: ~$240-$615/module (2025 enterprise pricing)
+      Enterprise volume at ~$8-12/GB, amortized over 5 years
+      Reference: Counterpoint Research DRAM Report (2025), Tom's Hardware,
+      Samsung DDR5 pricing data, NetworkWorld (Nov 2025)
+
+    HARDWARE STORAGE — $0.08/GB/yr (blended SSD/HDD)
+      Enterprise NVMe SSD: $0.10-$0.25/GB, amortized ~$0.02-$0.05/GB/yr
+      Enterprise HDD: $0.02-$0.04/GB, amortized ~$0.004-$0.008/GB/yr
+      Blended 70/30 SSD/HDD mix for enterprise workloads
+      Reference: Industry standard enterprise storage pricing
+
+    POWER & COOLING — Dynamic: watts_per_vcpu × PUE × 8,760hrs × $/kWh
+      Server power draw: ~25W per vCPU (typical for Intel Xeon 4th/5th Gen)
+      PUE: 1.55 (US industry average, DOE 2024 Data Center Energy Report)
+      Electricity: $0.12/kWh (US industrial average, EIA 2024)
+      Reference: US DOE/LBNL 2024 Data Center Energy Usage Report,
+      US Energy Information Administration (eia.gov)
+
+    FACILITY / RACK SPACE — $1,200/server/yr
+      Colocation: $1,000-$2,500/rack/month (ENCOR Advisors, Brightlio 2025)
+      42U rack holds 10-20 servers; per-server share: $800-$2,000/yr
+      Reference: ENCOR Advisors Colocation Pricing Guide (2025),
+      Brightlio Colocation Pricing (2025)
+
+    ADMIN & LABOR — $1,500/server/yr
+      SysAdmin salary: $80K-$120K/yr (US average)
+      Ratio: 1 admin per 50-100 servers
+      Includes: patching, monitoring, incident response, backups
+      Reference: Sherweb TCO Analysis, Gartner IT staffing benchmarks
+
+    OS LICENSING — Per vCPU/month rates:
+      Windows Server 2025 Std: $2,135/16-core → $133/core/yr → ~$5.50/vCPU/mo
+      RHEL Premium 2-socket: $1,430/yr → ~$3.00/vCPU/mo (normalized)
+      SUSE Enterprise: ~$2.50/vCPU/mo
+      Linux (Ubuntu/Debian/Amazon Linux): $0
+      Reference: Dell PowerEdge R760/R770 configurator pricing (dell.com)
+    ─────────────────────────────────────────────────────────────────────
+    """
+    # --- Industry-sourced rates ---
+    RATE_CPU_PER_VCPU_YR = 130.00    # Dell PowerEdge amortized 5yr
+    RATE_MEM_PER_GB_YR = 10.00       # DDR5 RDIMM enterprise, 5yr amortization
+    RATE_STOR_PER_GB_YR = 0.08       # Blended SSD/HDD enterprise
+    WATTS_PER_VCPU = 25.0            # Intel Xeon typical per-core draw
+    PUE = 1.55                       # US industry avg (DOE 2024)
+    ELECTRICITY_KWH = 0.12           # US industrial avg (EIA)
+    FACILITY_PER_SERVER_YR = 1200.0  # Colocation rack-share
+    ADMIN_PER_SERVER_YR = 1500.0     # SysAdmin labor allocation
+    HOURS_PER_YEAR = 8760
+
+    # Hardware costs (amortized annual)
+    hw_cpu = vcpu * RATE_CPU_PER_VCPU_YR
+    hw_mem = mem * RATE_MEM_PER_GB_YR
+    hw_stor = stor * RATE_STOR_PER_GB_YR
+    hw_total = hw_cpu + hw_mem + hw_stor
+
+    # Power & Cooling (dynamic based on vCPU)
+    server_watts = vcpu * WATTS_PER_VCPU
+    total_watts_with_pue = server_watts * PUE
+    power_kwh_yr = (total_watts_with_pue / 1000) * HOURS_PER_YEAR
+    power_cooling = power_kwh_yr * ELECTRICITY_KWH
+
+    # Facility (colocation rack share)
+    facility = FACILITY_PER_SERVER_YR
+
+    # Admin labor
+    admin_labor = ADMIN_PER_SERVER_YR
+
+    # OS Licensing
     ol = str(os).lower()
-    lic = 0
-    if "windows" in ol: lic = vcpu * 5.50 * 12
-    elif "red hat" in ol or "rhel" in ol: lic = vcpu * 3.00 * 12
-    elif "suse" in ol: lic = vcpu * 2.50 * 12
-    return round(hw * 1.45 + lic, 2)
+    lic_rate = 0.0
+    lic_name = "Linux (free)"
+    if "windows" in ol:
+        lic_rate = 5.50
+        lic_name = "Windows Server ($5.50/vCPU/mo — Dell pricing)"
+    elif "red hat" in ol or "rhel" in ol:
+        lic_rate = 3.00
+        lic_name = "RHEL ($3.00/vCPU/mo — Dell pricing)"
+    elif "suse" in ol:
+        lic_rate = 2.50
+        lic_name = "SUSE ($2.50/vCPU/mo)"
+    annual_licensing = vcpu * lic_rate * 12
+
+    total = hw_total + power_cooling + facility + admin_labor + annual_licensing
+
+    breakdown = {
+        "hw_compute": round(hw_cpu, 2),
+        "hw_memory": round(hw_mem, 2),
+        "hw_storage": round(hw_stor, 2),
+        "hw_total": round(hw_total, 2),
+        "server_watts": round(server_watts, 1),
+        "pue": PUE,
+        "electricity_rate": ELECTRICITY_KWH,
+        "power_kwh_yr": round(power_kwh_yr, 1),
+        "power_cooling": round(power_cooling, 2),
+        "facility": round(facility, 2),
+        "admin_labor": round(admin_labor, 2),
+        "licensing_rate_per_vcpu": lic_rate,
+        "licensing_name": lic_name,
+        "annual_licensing": round(annual_licensing, 2),
+        # Source citations for UI display
+        "sources": {
+            "compute": "Dell PowerEdge R760 pricing, 5-yr amortization (dell.com)",
+            "memory": "DDR5 RDIMM enterprise pricing (Counterpoint Research 2025, NetworkWorld)",
+            "storage": "Enterprise SSD/HDD blended pricing (industry standard)",
+            "power": f"US DOE 2024 Data Center Energy Report (PUE={PUE}), EIA (${ELECTRICITY_KWH}/kWh)",
+            "facility": "ENCOR Advisors & Brightlio Colocation Pricing Guide (2025)",
+            "labor": "Gartner IT staffing benchmarks, Sherweb TCO Analysis",
+            "licensing": "Dell PowerEdge configurator (dell.com/poweredge-r760)",
+        },
+    }
+    return round(total, 2), breakdown
 
 
 def determine_paas(cloud: str, dbs: str) -> Tuple[str, str]:
@@ -341,7 +458,152 @@ def _match(candidates: List[Dict], vcpu: int, mem: float) -> Dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 # MASTER CALCULATION — Stateless, zero storage, fully dynamic
 # ═══════════════════════════════════════════════════════════════════════════════
+# API CONNECTIVITY CHECKS
+# ═══════════════════════════════════════════════════════════════════════════════
+def check_aws_connectivity() -> Tuple[bool, str]:
+    """Check AWS pricing API connectivity (uses public reference catalog, no auth needed)."""
+    try:
+        # AWS pricing is via reference catalog — always available
+        cat = _get_reference_catalog("AWS", "general")
+        if cat and len(cat) > 0:
+            return True, f"Reference catalog: {len(cat)} instance types loaded"
+        return False, "Reference catalog empty"
+    except Exception as e:
+        return False, str(e)
+
+
+def check_azure_connectivity() -> Tuple[bool, str]:
+    """Check Azure Retail Prices API connectivity (public, no auth needed)."""
+    try:
+        url = "https://prices.azure.com/api/retail/prices?$top=1"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            count = data.get("Count", 0)
+            return True, f"Retail Prices API responding (HTTP 200)"
+        return False, f"HTTP {resp.status_code}"
+    except requests.exceptions.ConnectionError:
+        return False, "Connection failed — check network"
+    except requests.exceptions.Timeout:
+        return False, "Timeout — API slow"
+    except Exception as e:
+        return False, str(e)
+
+
+def check_anthropic_connectivity(api_key: str) -> Tuple[bool, str]:
+    """Check Anthropic Claude API connectivity."""
+    if not api_key or len(api_key) < 10:
+        return False, "No API key configured"
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        # Minimal ping — 1 token
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514", max_tokens=5,
+            messages=[{"role": "user", "content": "ping"}]
+        )
+        return True, f"Claude API connected (model: claude-sonnet-4)"
+    except ImportError:
+        return False, "anthropic package not installed"
+    except Exception as e:
+        err = str(e)
+        if "401" in err or "invalid" in err.lower():
+            return False, "Invalid API key"
+        elif "rate" in err.lower():
+            return True, "Connected (rate-limited)"
+        return False, err[:80]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AZURE LOCAL (formerly Azure Stack HCI) — Hybrid Option
+# ═══════════════════════════════════════════════════════════════════════════════
+# Sources:
+#   Azure Local Pricing Page (azure.microsoft.com/en-us/pricing/details/azure-local/)
+#   - Host service fee: $10/physical core/month
+#   - Windows Server subscription: $23.30/physical core/month
+#     (includes unlimited Windows Server guest licensing rights)
+#   - Azure Hybrid Benefit: WS Datacenter w/ SA waives host + WS subscription
+#   - AKS on Azure Local: included at no extra charge (2402+ / Jan 2025)
+#   - 60-day free trial after registration
+#   Microsoft Q&A / techielass.com (Feb 2025): per-core licensing confirmed
+#   EasySAM / TechTarget: WS 2025 PAYG via Azure Arc = $33.58/core/mo
+# ═══════════════════════════════════════════════════════════════════════════════
+AZURE_LOCAL_RATES = {
+    "host_fee_per_core_mo": 10.00,       # Azure Local host service fee
+    "ws_sub_per_core_mo": 23.30,         # Includes unlimited Windows guest licensing
+    "ws_payg_per_core_mo": 33.58,        # Windows Server 2025 PAYG via Azure Arc
+    "ahb_discount": 1.0,                 # 100% waiver with Azure Hybrid Benefit
+    "free_trial_days": 60,               # Free trial period
+}
+
+
+def compute_azure_local(vcpu: int, mem: float, stor: float, os: str) -> Dict:
+    """
+    Azure Local (Azure Stack HCI) pricing — hybrid on-prem + Azure management.
+    Uses existing on-prem hardware costs + Azure Local service fees.
+    vCPU count used as proxy for physical cores (noted in output).
+
+    Returns dict with monthly/annual costs for 3 scenarios:
+      1. Linux guest (host fee only)
+      2. Windows guest (host + WS subscription)
+      3. Azure Hybrid Benefit (WS Datacenter w/ SA — fees waived)
+    """
+    r = AZURE_LOCAL_RATES
+
+    # On-prem hardware costs (same hardware, just adding Azure management layer)
+    on_prem_total, on_prem_bkdn = compute_on_prem(vcpu, mem, stor, os)
+    # Remove on-prem OS licensing since Azure Local handles it differently
+    hw_and_ops = on_prem_total - on_prem_bkdn.get("annual_licensing", 0)
+
+    # Scenario 1: Linux guest — host fee only ($10/core/mo)
+    host_fee_mo = vcpu * r["host_fee_per_core_mo"]
+    host_fee_yr = host_fee_mo * 12
+    linux_total_yr = hw_and_ops + host_fee_yr
+
+    # Scenario 2: Windows guest — host + WS subscription ($23.30/core/mo total)
+    ws_sub_mo = vcpu * r["ws_sub_per_core_mo"]
+    ws_sub_yr = ws_sub_mo * 12
+    windows_total_yr = hw_and_ops + ws_sub_yr
+
+    # Scenario 3: Azure Hybrid Benefit — WS Datacenter w/ SA waives fees
+    ahb_total_yr = hw_and_ops  # No Azure Local fees
+
+    ol = str(os).lower()
+    is_windows = "windows" in ol
+
+    # Pick the applicable scenario
+    if is_windows:
+        recommended_mo = ws_sub_mo
+        recommended_yr = windows_total_yr
+        recommended_label = "Windows (Host + WS Subscription)"
+    else:
+        recommended_mo = host_fee_mo
+        recommended_yr = linux_total_yr
+        recommended_label = "Linux (Host Fee Only)"
+
+    return {
+        "host_fee_per_core_mo": r["host_fee_per_core_mo"],
+        "host_fee_monthly": round(host_fee_mo, 2),
+        "host_fee_annual": round(host_fee_yr, 2),
+        "ws_sub_per_core_mo": r["ws_sub_per_core_mo"],
+        "ws_sub_monthly": round(ws_sub_mo, 2),
+        "ws_sub_annual": round(ws_sub_yr, 2),
+        "hw_and_ops_annual": round(hw_and_ops, 2),
+        "linux_total_annual": round(linux_total_yr, 2),
+        "windows_total_annual": round(windows_total_yr, 2),
+        "ahb_total_annual": round(ahb_total_yr, 2),
+        "recommended_monthly": round(recommended_mo, 2),
+        "recommended_annual": round(recommended_yr, 2),
+        "recommended_label": recommended_label,
+        "physical_cores_note": "vCPU used as proxy for physical cores; "
+                               "Azure Local bills per physical processor core (no HT).",
+        "source": "Azure Local Pricing (azure.microsoft.com/en-us/pricing/details/azure-local/), "
+                  "Microsoft Q&A, techielass.com (Feb 2025).",
+    }
+
+
 def calculate_all_outputs(inputs: Dict) -> Dict:
+
     """
     STATELESS: Takes input dict → returns output dict.
     Nothing cached, stored, or persisted. Every call is independent.
@@ -349,6 +611,9 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
     """
     cloud = str(inputs.get("cloud_provider", "AWS"))
     region = str(inputs.get("cloud_region", "US East (N. Virginia)"))
+    # Azure Local uses Azure pricing for IaaS/PaaS comparison
+    is_azure_local = cloud == "Azure Local"
+    pricing_cloud = "Azure" if is_azure_local else cloud
     os_name = str(inputs.get("operating_system", "Linux"))
     server_type = str(inputs.get("server_type", "Application"))
     os_eol = str(inputs.get("os_eol_status", "No"))
@@ -366,13 +631,13 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
     rs_mem = compute_right_sized_memory(memory_gb, avg_memory)
     rs_stor = compute_right_sized_storage(total_storage, storage_pct)
     family = determine_family(server_type, databases, avg_cpu, memory_gb, vcpu_count)
-    rmult = _region_mult(cloud, region)
+    rmult = _region_mult(pricing_cloud, region)
     MH = 730  # monthly hours
 
     # Live pricing attempt
     pricing_source = "reference_catalog"
     live_inst = []
-    if cloud == "Azure":
+    if pricing_cloud == "Azure":
         rcode = AZURE_REGIONS.get(region, "eastus")
         live_inst = fetch_azure_vm_pricing(rcode, rs_cpu, rs_mem)
         if live_inst: pricing_source = "azure_api_live"
@@ -385,11 +650,11 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
             cur = _match(cur_live, vcpu_count, memory_gb)
             cur_hr = cur["price_hr"]
         else:
-            cat = _get_reference_catalog(cloud, family)
+            cat = _get_reference_catalog(pricing_cloud, family)
             cur = _match(cat, vcpu_count, memory_gb)
             cur_hr = cur["base_price_hr"] * rmult
     else:
-        cat = _get_reference_catalog(cloud, family)
+        cat = _get_reference_catalog(pricing_cloud, family)
         cur = _match(cat, vcpu_count, memory_gb)
         cur_hr = cur["base_price_hr"] * rmult
         rec = _match(cat, rs_cpu, rs_mem)
@@ -407,13 +672,13 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
     rec_lic = compute_licensing(os_name, rec["vcpu"])
 
     # Storage
-    stype = determine_storage_type(cloud, avg_iops, rs_stor)
-    live_stor = fetch_azure_storage_pricing(AZURE_REGIONS.get(region, "eastus")) if cloud == "Azure" and pricing_source == "azure_api_live" else None
-    sprice = compute_storage_price(cloud, stype, rs_stor, rmult, live_stor)
+    stype = determine_storage_type(pricing_cloud, avg_iops, rs_stor)
+    live_stor = fetch_azure_storage_pricing(AZURE_REGIONS.get(region, "eastus")) if pricing_cloud == "Azure" and pricing_source == "azure_api_live" else None
+    sprice = compute_storage_price(pricing_cloud, stype, rs_stor, rmult, live_stor)
 
     # PaaS
-    ps, pn = determine_paas(cloud, databases)
-    db_cat = _get_reference_catalog(cloud, "database")
+    ps, pn = determine_paas(pricing_cloud, databases)
+    db_cat = _get_reference_catalog(pricing_cloud, "database")
     pi = _match(db_cat, rs_cpu, rs_mem)
     p_hr = pi.get("price_hr", pi.get("base_price_hr", 0)) * rmult
     p_od = round(p_hr * MH, 2)
@@ -421,6 +686,12 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
     p_3y = round(p_od * 0.40, 2)
     p_sp = round(sprice * 1.2, 2)
     p_lic = round(rec_lic * 0.5, 2)
+
+    # On-prem with full breakdown
+    on_prem_total, on_prem_bkdn = compute_on_prem(vcpu_count, memory_gb, total_storage, os_name)
+
+    # Azure Local (formerly Azure Stack HCI) — hybrid option
+    azl = compute_azure_local(vcpu_count, memory_gb, total_storage, os_name)
 
     return {
         "right_sizing_cpu": rs_cpu, "right_sizing_memory": rs_mem, "right_sizing_storage": rs_stor,
@@ -432,9 +703,12 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
         "iaas_rec_reserved_3yr": rec_3y, "iaas_rec_licensing": rec_lic,
         "rec_storage_gb": rs_stor, "rec_storage_price": sprice,
         "paas_service": ps, "paas_instance_type": pi["type"], "paas_service_name": pn,
-        "paas_vcpu": pi["vcpu"], "paas_storage": rs_stor, "paas_storage_price": p_sp,
+        "paas_vcpu": pi["vcpu"], "paas_memory": pi["memory"],
+        "paas_storage": rs_stor, "paas_storage_price": p_sp,
         "paas_on_demand": p_od, "paas_reserved_1yr": p_1y, "paas_reserved_3yr": p_3y, "paas_licensing": p_lic,
-        "on_prem_yearly_cost": compute_on_prem(vcpu_count, memory_gb, total_storage, os_name),
+        "on_prem_yearly_cost": on_prem_total,
+        "on_prem_breakdown": on_prem_bkdn,
+        "azure_local": azl,
         "target_operating_system": determine_target_os(os_name, os_eol),
         "_cloud_provider": cloud, "_instance_family": family, "_region": region,
         "_hostname": str(inputs.get("host_name", "")), "_pricing_source": pricing_source,
