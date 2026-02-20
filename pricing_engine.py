@@ -693,6 +693,27 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
     # Azure Local (formerly Azure Stack HCI) — hybrid option
     azl = compute_azure_local(vcpu_count, memory_gb, total_storage, os_name)
 
+    # ── CROSS-PROVIDER COMPARISON ──────────────────────────────────────────────
+    # Compute IaaS 3yr RI annual cost for BOTH AWS and Azure regardless of
+    # which was selected, so every row shows all 3 + on-prem side by side.
+    xp = {}
+    for xcloud in ["AWS", "Azure"]:
+        xrmult = _region_mult(xcloud, region)
+        xcat = _get_reference_catalog(xcloud, family)
+        xrec = _match(xcat, rs_cpu, rs_mem)
+        xrec_hr = xrec["base_price_hr"] * xrmult
+        xrec_od = round(xrec_hr * MH, 2)
+        xrec_3y = round(xrec_od * 0.40, 2)
+        xrec_lic = compute_licensing(os_name, xrec["vcpu"])
+        xstype = determine_storage_type(xcloud, avg_iops, rs_stor)
+        xsprice = compute_storage_price(xcloud, xstype, rs_stor, xrmult)
+        xannual = round((xrec_3y + xrec_lic + xsprice) * 12, 2)
+        xp[xcloud] = {
+            "instance_type": xrec["type"], "vcpu": xrec["vcpu"], "memory": xrec["memory"],
+            "monthly_3yr_ri": round(xrec_3y + xrec_lic + xsprice, 2),
+            "annual_3yr_ri": xannual,
+        }
+
     return {
         "right_sizing_cpu": rs_cpu, "right_sizing_memory": rs_mem, "right_sizing_storage": rs_stor,
         "iaas_on_demand_price": iaas_od, "iaas_reserved_1yr_price": iaas_1y,
@@ -709,6 +730,7 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
         "on_prem_yearly_cost": on_prem_total,
         "on_prem_breakdown": on_prem_bkdn,
         "azure_local": azl,
+        "cross_provider": xp,
         "target_operating_system": determine_target_os(os_name, os_eol),
         "_cloud_provider": cloud, "_instance_family": family, "_region": region,
         "_hostname": str(inputs.get("host_name", "")), "_pricing_source": pricing_source,

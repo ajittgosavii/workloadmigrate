@@ -12,7 +12,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import io, os, datetime, markdown as md_lib
+import io, os, datetime
 from openpyxl.styles import Font, PatternFill, Alignment
 from typing import Dict, List
 
@@ -21,16 +21,6 @@ from pricing_engine import (
     check_aws_connectivity, check_azure_connectivity, check_anthropic_connectivity,
 )
 from recommendation_engine import get_ai_recommendation, get_batch_ai_summary
-
-
-def render_ai_analysis(text: str, title: str = "Claude AI Analysis"):
-    """Render AI markdown response as a beautifully formatted card."""
-    html_content = md_lib.markdown(text, extensions=["tables", "fenced_code", "nl2br"])
-    st.markdown(f'''<div class="ai-box">
-        <h3>🤖 {title}</h3>
-        <div class="ai-subtitle">AI-generated analysis — verify figures against computed data above</div>
-        {html_content}
-    </div>''', unsafe_allow_html=True)
 
 # ─── Page Config ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Cloud Migration Analyzer", page_icon="☁️",
@@ -69,23 +59,9 @@ st.markdown("""
     .output-table td { padding:.6rem 1rem; color:#E0E0E0; border-bottom:1px solid rgba(255,255,255,0.05);
         font-family:'JetBrains Mono',monospace; font-size:.88rem; }
     .output-table tr:last-child td { border-bottom:none; }
-    .ai-box { background:linear-gradient(135deg,#0d1b2a,#1b2838,#162032); border:1px solid rgba(0,212,170,0.4);
-        border-radius:14px; padding:2rem 2.2rem; margin:1.2rem 0; box-shadow:0 4px 24px rgba(0,212,170,0.08); }
-    .ai-box h3 { color:var(--accent); margin:0 0 .4rem 0; font-size:1.3rem; }
-    .ai-box .ai-subtitle { color:rgba(255,255,255,0.5); font-size:.82rem; margin-bottom:1.2rem; }
-    .ai-box h4, .ai-box h5 { color:#6C9FFF; margin:1.4rem 0 .5rem 0; border-bottom:1px solid rgba(108,159,255,0.2); padding-bottom:.3rem; }
-    .ai-box p { color:rgba(255,255,255,0.88); line-height:1.65; margin:0.4rem 0; }
-    .ai-box ul, .ai-box ol { color:rgba(255,255,255,0.88); padding-left:1.4rem; }
-    .ai-box li { margin:0.3rem 0; line-height:1.55; }
-    .ai-box strong { color:#FFD93D; }
-    .ai-box code { background:rgba(0,212,170,0.1); color:var(--accent); padding:1px 5px; border-radius:3px; font-size:.85rem; }
-    .ai-box table { width:100%; border-collapse:collapse; margin:.6rem 0; }
-    .ai-box table th { background:rgba(108,159,255,0.15); color:#6C9FFF; padding:.5rem .8rem; text-align:left;
-        border-bottom:1px solid rgba(108,159,255,0.3); font-size:.82rem; }
-    .ai-box table td { padding:.4rem .8rem; border-bottom:1px solid rgba(255,255,255,0.06); color:rgba(255,255,255,0.85);
-        font-size:.82rem; }
-    .ai-box table tr:hover td { background:rgba(255,255,255,0.03); }
-    .ai-box hr { border:none; border-top:1px solid rgba(255,255,255,0.08); margin:1rem 0; }
+    .ai-box { background:linear-gradient(135deg,#1a2332,#1e293b); border:1px solid rgba(0,212,170,0.3);
+        border-radius:12px; padding:1.5rem; margin:1rem 0; }
+    .ai-box h4 { color:var(--accent); margin:0 0 .8rem 0; }
     .badge { display:inline-block; padding:.2rem .6rem; border-radius:20px; font-size:.73rem; font-weight:600; }
     .badge-live { background:rgba(0,212,170,0.15); color:var(--accent); }
     .badge-ref { background:rgba(108,159,255,0.15); color:var(--info); }
@@ -375,10 +351,6 @@ def build_output_row(inp: Dict, out: Dict) -> Dict:
         "PAAS Recommended 1 Year Price ($)": round(out["paas_reserved_1yr"] * cmult, 2),
         "PAAS Recommended 3 Year Price ($)": round(out["paas_reserved_3yr"] * cmult, 2),
         "PAAS Recommended Service Licensing Price ($)": round(out["paas_licensing"] * cmult, 2),
-        "AWS Annual (3yr RI) ($)": round(out["cross_provider"]["AWS"]["annual_3yr_ri"] * cmult, 2),
-        "AWS Instance Type": out["cross_provider"]["AWS"]["instance_type"],
-        "Azure Annual (3yr RI) ($)": round(out["cross_provider"]["Azure"]["annual_3yr_ri"] * cmult, 2),
-        "Azure Instance Type": out["cross_provider"]["Azure"]["instance_type"],
         "Azure Local Host Fee ($/mo)": round(out["azure_local"]["host_fee_monthly"] * cmult, 2),
         "Azure Local WS Subscription ($/mo)": round(out["azure_local"]["ws_sub_monthly"] * cmult, 2),
         "Azure Local Linux Annual ($)": round(out["azure_local"]["linux_total_annual"] * cmult, 2),
@@ -409,19 +381,16 @@ def render_server_card(inp: Dict, out: Dict, idx: int):
 
     with st.expander(f"✅ **{host}** — {cloud} {region} | Instance: `{out['recomm_instance_type']}` | "
                      f"{'↓' if savings > 0 else '↑'} {fp(abs(savings))}/yr ({abs(sav_pct):.0f}%) {sav_label}", expanded=(idx < 3)):
-        xp = out.get("cross_provider", {})
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
             mc("Right-Sized", f"{out['right_sizing_cpu']} vCPU / {out['right_sizing_memory']} GB",
                f"Storage: {out['right_sizing_storage']} GB")
         with c2:
-            aws_a = xp.get("AWS", {}).get("annual_3yr_ri", 0)
-            mc("AWS (3yr RI)", fp(aws_a) + "/yr",
-               xp.get("AWS", {}).get("instance_type", ""))
+            mc("IaaS 3yr RI", fp(out['iaas_rec_reserved_3yr']) + "/mo",
+               f"OD: {fp(out['iaas_rec_on_demand'])}/mo", "metric-blue")
         with c3:
-            az_a = xp.get("Azure", {}).get("annual_3yr_ri", 0)
-            mc("Azure (3yr RI)", fp(az_a) + "/yr",
-               xp.get("Azure", {}).get("instance_type", ""), "metric-blue")
+            mc("PaaS 3yr RI", fp(out['paas_reserved_3yr']) + "/mo",
+               out['paas_service_name'], "metric-yellow")
         with c4:
             azl = out.get("azure_local", {})
             mc("Azure Local", fp(azl.get('recommended_annual', 0)) + "/yr",
@@ -429,9 +398,6 @@ def render_server_card(inp: Dict, out: Dict, idx: int):
         with c5:
             mc("On-Prem Yearly", fp(out['on_prem_yearly_cost']),
                f"Target: {out['target_operating_system']}", "metric-red")
-        with c6:
-            mc("PaaS 3yr RI", fp(out['paas_reserved_3yr']) + "/mo",
-               out['paas_service_name'], "metric-yellow")
 
         # On-Prem cost breakdown
         bk = out.get("on_prem_breakdown", {})
@@ -492,30 +458,23 @@ def generate_excel(results: List[Dict]) -> bytes:
         op = o["on_prem_yearly_cost"]
         iaas_3y = (o["iaas_rec_reserved_3yr"] + o["iaas_rec_licensing"] + o["rec_storage_price"]) * 12
         paas_3y = (o["paas_reserved_3yr"] + o["paas_licensing"] + o["paas_storage_price"]) * 12
-        aws_ann = o["cross_provider"]["AWS"]["annual_3yr_ri"]
-        az_ann = o["cross_provider"]["Azure"]["annual_3yr_ri"]
-        best_cloud = min(aws_ann, az_ann)
-        sav = op - best_cloud
+        sav = op - iaas_3y
         bk = o.get("on_prem_breakdown", {})
         azl_d = o.get("azure_local", {})
         sum_rows.append({
             "Host": r["inputs"]["host_name"],
-            "Cloud Provider": r["inputs"].get("cloud_provider", ""),
             "On-Prem Annual ($)": round(op, 2),
             "  Hardware (Compute+Mem+Stor)": round(bk.get("hw_total", 0), 2),
             "  Power & Cooling": round(bk.get("power_cooling", 0), 2),
             "  Facility/Rack": round(bk.get("facility", 0), 2),
             "  Admin/Labor": round(bk.get("admin_labor", 0), 2),
             "  OS Licensing": round(bk.get("annual_licensing", 0), 2),
-            "AWS Annual (3yr RI) ($)": round(aws_ann, 2),
-            "AWS Instance": o["cross_provider"]["AWS"]["instance_type"],
-            "Azure Annual (3yr RI) ($)": round(az_ann, 2),
-            "Azure Instance": o["cross_provider"]["Azure"]["instance_type"],
+            "IaaS 3yr RI Annual ($)": round(iaas_3y, 2),
             "PaaS 3yr RI Annual ($)": round(paas_3y, 2),
             "Azure Local Linux Annual ($)": round(azl_d.get("linux_total_annual", 0), 2),
             "Azure Local Windows Annual ($)": round(azl_d.get("windows_total_annual", 0), 2),
             "Azure Local AHB Annual ($)": round(azl_d.get("ahb_total_annual", 0), 2),
-            "Best Cloud Savings ($)": round(sav, 2),
+            "Savings vs On-Prem ($)": round(sav, 2),
             "Savings %": round((sav / op * 100) if op > 0 else 0, 1),
         })
 
@@ -712,19 +671,13 @@ def render_single_output(inputs: Dict, outputs: Dict):
             </div>""", unsafe_allow_html=True)
     with t2:
         mc("On-Prem Yearly Cost", fp(outputs['on_prem_yearly_cost']), "", "metric-red")
-        xp = outputs.get("cross_provider", {})
-        aws_ann = xp.get("AWS", {}).get("annual_3yr_ri", 0)
-        az_ann = xp.get("Azure", {}).get("annual_3yr_ri", 0)
-        mc("AWS Annual (3yr RI)", fp(aws_ann),
-           f"Instance: {xp.get('AWS', {}).get('instance_type', '')}")
-        mc("Azure Annual (3yr RI)", fp(az_ann),
-           f"Instance: {xp.get('Azure', {}).get('instance_type', '')}", "metric-blue")
+        annual_cloud = (outputs['iaas_rec_reserved_3yr'] + outputs['iaas_rec_licensing'] + outputs['rec_storage_price']) * 12
+        savings = outputs['on_prem_yearly_cost'] - annual_cloud
+        mc("Cloud Annual (3yr RI)", fp(annual_cloud))
         azl_r = outputs.get("azure_local", {})
         mc("Azure Local Annual", fp(azl_r.get('recommended_annual', 0)),
            azl_r.get('recommended_label', ''), "metric-blue")
-        best_cloud = min(aws_ann, az_ann)
-        savings = outputs['on_prem_yearly_cost'] - best_cloud
-        mc("Best Cloud Savings", fp(abs(savings)),
+        mc("Annual Savings (Cloud)", fp(abs(savings)),
            f"{'↓' if savings > 0 else '↑'} {abs(savings / max(1, outputs['on_prem_yearly_cost']) * 100):.1f}%",
            "" if savings > 0 else "metric-red")
 
@@ -934,11 +887,11 @@ with tab_manual:
         render_single_output(inp, out)
 
         if show_ai and api_key:
-            st.markdown('<div class="section-header">🤖 AI Migration Analysis</div>', unsafe_allow_html=True)
-            if st.button("🧠 Generate Deep AI Analysis", type="primary", key="ai_m"):
-                with st.spinner("Claude analyzing server profile, cross-provider costs, risks, and migration strategy…"):
+            st.markdown('<div class="section-header">🤖 AI Recommendations</div>', unsafe_allow_html=True)
+            if st.button("🧠 Generate AI Analysis", key="ai_m"):
+                with st.spinner("Asking Claude…"):
                     rec = get_ai_recommendation(inp, out, api_key)
-                render_ai_analysis(rec, "Server Migration Analysis")
+                st.markdown(f'<div class="ai-box"><h4>🤖 Claude AI</h4><div>{rec}</div></div>', unsafe_allow_html=True)
         elif show_ai and not api_key:
             st.info("💡 Add `ANTHROPIC_API_KEY` to `.streamlit/secrets.toml` or enter in sidebar.")
 
@@ -964,19 +917,16 @@ with tab_results:
         st.markdown('<div class="section-header">📊 Portfolio Dashboard</div>', unsafe_allow_html=True)
 
         t_op = sum(r["outputs"]["on_prem_yearly_cost"] for r in results)
-        t_aws = sum(r["outputs"]["cross_provider"]["AWS"]["annual_3yr_ri"] for r in results)
-        t_az = sum(r["outputs"]["cross_provider"]["Azure"]["annual_3yr_ri"] for r in results)
+        t_3yr = sum((r["outputs"]["iaas_rec_reserved_3yr"]+r["outputs"]["iaas_rec_licensing"]+r["outputs"]["rec_storage_price"])*12 for r in results)
         t_azl = sum(r["outputs"].get("azure_local", {}).get("recommended_annual", 0) for r in results)
-        t_best = min(t_aws, t_az)
-        t_sav = t_op - t_best
+        t_sav = t_op - t_3yr
 
-        s1, s2, s3, s4, s5, s6 = st.columns(6)
+        s1, s2, s3, s4, s5 = st.columns(5)
         with s1: mc("Total Servers", str(n))
         with s2: mc("On-Prem Annual", fp(t_op), "Current", "metric-red")
-        with s3: mc("AWS Annual (3yr)", fp(t_aws), "IaaS Optimized")
-        with s4: mc("Azure Annual (3yr)", fp(t_az), "IaaS Optimized", "metric-blue")
-        with s5: mc("Azure Local Annual", fp(t_azl), "Hybrid", "metric-blue")
-        with s6: mc("Best Cloud Savings", fp(abs(t_sav)), f"{abs(t_sav/max(1,t_op)*100):.1f}%", "" if t_sav > 0 else "metric-red")
+        with s3: mc("Cloud Annual (3yr)", fp(t_3yr), "IaaS Optimized")
+        with s4: mc("Azure Local Annual", fp(t_azl), "Hybrid", "metric-blue")
+        with s5: mc("Cloud Savings", fp(abs(t_sav)), f"{abs(t_sav/max(1,t_op)*100):.1f}%", "" if t_sav > 0 else "metric-red")
 
         # On-Prem methodology note
         with st.expander("📊 On-Prem Cost Methodology — Industry-Sourced Rates", expanded=False):
@@ -1036,10 +986,10 @@ with tab_results:
                 fig = go.Figure()
                 hosts = [r["inputs"]["host_name"] for r in chart_data]
                 fig.add_trace(go.Bar(name="On-Prem", x=hosts, y=[r["outputs"]["on_prem_yearly_cost"]*cmult for r in chart_data], marker_color="#FF6B6B"))
-                fig.add_trace(go.Bar(name="AWS (3yr RI)", x=hosts,
-                    y=[r["outputs"]["cross_provider"]["AWS"]["annual_3yr_ri"]*cmult for r in chart_data], marker_color="#FF9900"))
-                fig.add_trace(go.Bar(name="Azure (3yr RI)", x=hosts,
-                    y=[r["outputs"]["cross_provider"]["Azure"]["annual_3yr_ri"]*cmult for r in chart_data], marker_color="#0078D4"))
+                fig.add_trace(go.Bar(name="IaaS 3yr", x=hosts,
+                    y=[(r["outputs"]["iaas_rec_reserved_3yr"]+r["outputs"]["iaas_rec_licensing"]+r["outputs"]["rec_storage_price"])*12*cmult for r in chart_data], marker_color="#00D4AA"))
+                fig.add_trace(go.Bar(name="PaaS 3yr", x=hosts,
+                    y=[(r["outputs"]["paas_reserved_3yr"]+r["outputs"]["paas_licensing"]+r["outputs"]["paas_storage_price"])*12*cmult for r in chart_data], marker_color="#6C9FFF"))
                 fig.add_trace(go.Bar(name="Azure Local", x=hosts,
                     y=[r["outputs"].get("azure_local", {}).get("recommended_annual", 0)*cmult for r in chart_data], marker_color="#9B59B6"))
                 fig.update_layout(title=f"Annual Cost by Server{chart_label}", barmode="group", template="plotly_dark",
@@ -1066,11 +1016,11 @@ with tab_results:
                 st.plotly_chart(fig_h, use_container_width=True)
 
         if show_ai and api_key:
-            st.markdown('<div class="section-header">🤖 AI Portfolio Strategy</div>', unsafe_allow_html=True)
-            if st.button("🧠 Generate Executive Decision Brief", type="primary", key="ai_b"):
-                with st.spinner("Claude analyzing portfolio: cross-provider costs, migration waves, risk register, 3-year projection…"):
+            st.markdown('<div class="section-header">🤖 AI Portfolio Summary</div>', unsafe_allow_html=True)
+            if st.button("🧠 Portfolio AI Analysis", key="ai_b"):
+                with st.spinner("Claude analyzing…"):
                     s = get_batch_ai_summary(results, api_key)
-                render_ai_analysis(s, "Executive Portfolio Analysis")
+                st.markdown(f'<div class="ai-box"><h4>🤖 Claude AI</h4><div>{s}</div></div>', unsafe_allow_html=True)
 
         # Export
         st.markdown('<div class="section-header">📥 Export Portfolio</div>', unsafe_allow_html=True)
