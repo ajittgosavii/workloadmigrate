@@ -231,33 +231,56 @@ def render_login_page(st):
     """Render Streamlit login form. Returns user_info if authenticated."""
     auth = AuthManager()
 
+    # ── Scoped CSS: constrain the login form into a narrow centered card ──
     st.markdown("""
-    <div style="text-align:center; padding:3rem 0 1rem 0;">
-        <h1 style="font-size:2.5rem;">💎 Infosys Cobalt — Migration Analyzer</h1>
-        <p style="color:#94A3B8;">Please sign in to continue</p>
+    <style>
+        /* Hide sidebar and top padding on the login page */
+        [data-testid="stSidebar"] { display: none; }
+        .block-container { padding-top: 2rem !important; max-width: 420px !important; margin: 0 auto; }
+
+        /* Logo + header above the form */
+        .login-header {
+            text-align: center; padding: 2rem 0 0.5rem 0;
+        }
+        .login-header img {
+            height: 38px; filter: brightness(1.8) saturate(1.2);
+            margin-bottom: 0.6rem;
+        }
+        .login-header h2 {
+            font-size: 1.3rem; font-weight: 700; color: #E0E6ED;
+            margin: 0 0 0.15rem 0;
+        }
+        .login-header p {
+            font-size: 0.85rem; color: #8B98A8; margin: 0;
+        }
+    </style>
+
+    <div class="login-header">
+        <img src="https://cdn.worldvectorlogo.com/logos/infosys-cobalt-1.svg"
+             alt="Infosys Cobalt" /><br>
+        <h2>Migration Analyzer</h2>
+        <p>Please sign in to continue</p>
     </div>
     """, unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        with st.form("login_form"):
-            username = st.text_input("Username", placeholder="Enter your username")
-            password = st.text_input("Password", type="password", placeholder="Enter your password")
-            submitted = st.form_submit_button("Sign In", use_container_width=True, type="primary")
+    with st.form("login_form"):
+        username = st.text_input("Username", placeholder="Enter your username")
+        password = st.text_input("Password", type="password", placeholder="Enter your password")
+        submitted = st.form_submit_button("Sign In", use_container_width=True, type="primary")
 
-            if submitted:
-                if not username or not password:
-                    st.error("Please enter both username and password.")
-                    return None
+        if submitted:
+            if not username or not password:
+                st.error("Please enter both username and password.")
+                return None
 
-                success, message, user_info = auth.authenticate(username, password)
-                if success:
-                    st.session_state["_auth_user"] = user_info
-                    st.success(message)
-                    st.rerun()
-                else:
-                    st.error(message)
+            success, message, user_info = auth.authenticate(username, password)
+            if success:
+                st.session_state["_auth_user"] = user_info
+                st.success(message)
+                st.rerun()
+            else:
+                st.error(message)
 
-        st.caption("Default accounts: admin/admin123, analyst/analyst123, viewer/viewer123")
+    st.caption("Default accounts: admin/admin123, analyst/analyst123, viewer/viewer123")
 
     return st.session_state.get("_auth_user")
