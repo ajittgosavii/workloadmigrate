@@ -1,4 +1,4 @@
-# ☁️ Cloud Migration Cost Analyzer — Compliance-Ready
+# 💎 Infosys Cobalt — Migration Analyzer
 
 Enterprise Streamlit application for cloud migration planning with **zero data persistence**, **real-time pricing**, **dynamic computation**, and **AI recommendations**.
 

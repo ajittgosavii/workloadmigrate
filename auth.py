@@ -233,7 +233,7 @@ def render_login_page(st):
 
     st.markdown("""
     <div style="text-align:center; padding:3rem 0 1rem 0;">
-        <h1 style="font-size:2.5rem;">☁️ Cloud Migration Analyzer</h1>
+        <h1 style="font-size:2.5rem;">💎 Infosys Cobalt — Migration Analyzer</h1>
         <p style="color:#94A3B8;">Please sign in to continue</p>
     </div>
     """, unsafe_allow_html=True)

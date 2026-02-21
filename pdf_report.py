@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 
 def generate_pdf_report(
     results: List[Dict],
-    report_title: str = "Cloud Migration Analysis Report",
+    report_title: str = "Infosys Cobalt — Migration Analysis Report",
     currency_symbol: str = "$",
     currency_multiplier: float = 1.0,
     include_ai_analysis: Optional[str] = None,

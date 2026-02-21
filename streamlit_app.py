@@ -1,5 +1,5 @@
 """
-☁️ Cloud Migration Cost Analyzer — Compliance-Ready
+Infosys Cobalt — Migration Analyzer
 =====================================================
 • All outputs dynamically computed from user inputs
 • ZERO data stored, cached, or persisted on server
@@ -104,6 +104,12 @@ try:
 except ImportError:
     HAS_RETRY = False
 
+try:
+    from async_processor import BatchProcessor
+    HAS_ASYNC = True
+except ImportError:
+    HAS_ASYNC = False
+
 
 def render_ai_analysis(text: str, title: str = "Claude AI Analysis"):
     """Render AI markdown response as a beautifully formatted card."""
@@ -123,8 +129,55 @@ def render_ai_analysis(text: str, title: str = "Claude AI Analysis"):
         {html_content}
     </div>''', unsafe_allow_html=True)
 
+
+def _paginated_dataframe(df, key_prefix, page_size=100, height_cap=500):
+    """Display a DataFrame with pagination controls for large datasets.
+
+    For datasets <= page_size rows, displays normally (no pagination overhead).
+    For larger datasets, shows page navigation with configurable rows-per-page.
+    """
+    total_rows = len(df)
+    if total_rows <= page_size:
+        st.dataframe(df, use_container_width=True,
+                      height=min(height_cap, 50 + total_rows * 35))
+        return
+
+    # ── Pagination controls ──
+    c_rpp, c_page, c_info, c_jump = st.columns([1, 1, 2, 1])
+    with c_rpp:
+        rpp = st.selectbox("Rows / page", [50, 100, 200, 500],
+                           index=[50, 100, 200, 500].index(page_size)
+                           if page_size in [50, 100, 200, 500] else 1,
+                           key=f"{key_prefix}_rpp")
+    total_pages = max(1, (total_rows + rpp - 1) // rpp)
+    with c_page:
+        page = st.number_input("Page", min_value=1, max_value=total_pages,
+                               value=1, step=1, key=f"{key_prefix}_pg")
+    start = (page - 1) * rpp
+    end = min(start + rpp, total_rows)
+    with c_info:
+        st.markdown(f"<br><span style='color:#8B98A8;'>Rows **{start + 1:,}**–**{end:,}** of "
+                    f"**{total_rows:,}** &nbsp;|&nbsp; Page {page} of {total_pages}</span>",
+                    unsafe_allow_html=True)
+    with c_jump:
+        if total_pages > 10:
+            jump = st.selectbox("Jump to", ["First", "Last"],
+                                key=f"{key_prefix}_jmp", label_visibility="collapsed")
+            if jump == "Last" and page != total_pages:
+                st.session_state[f"{key_prefix}_pg"] = total_pages
+                st.rerun()
+            elif jump == "First" and page != 1:
+                st.session_state[f"{key_prefix}_pg"] = 1
+                st.rerun()
+
+    # ── Display page slice ──
+    page_df = df.iloc[start:end].reset_index(drop=True)
+    st.dataframe(page_df, use_container_width=True,
+                  height=min(height_cap, 50 + len(page_df) * 35))
+
+
 # ─── Page Config ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Cloud Migration Analyzer", page_icon="☁️",
+st.set_page_config(page_title="Infosys Cobalt — Migration Analyzer", page_icon="💎",
                    layout="wide", initial_sidebar_state="expanded")
 
 # ─── Custom CSS — Dark Enterprise Theme ─────────────────────────────────────
@@ -240,9 +293,46 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ─── RBAC Authentication Gate ────────────────────────────────────────────────
+if HAS_AUTH:
+    # Initialize auth manager once
+    if "_auth_mgr" not in st.session_state:
+        st.session_state["_auth_mgr"] = AuthManager()
+    _auth = st.session_state["_auth_mgr"]
+
+    # Check if already logged in and session still valid
+    _user = st.session_state.get("_auth_user")
+    if _user and not _auth.is_session_valid(_user):
+        st.session_state.pop("_auth_user", None)
+        _user = None
+
+    if not _user:
+        _user = render_login_page(st)
+        if not _user:
+            st.stop()
+
+    # Logged-in user info for sidebar display
+    _current_user = st.session_state.get("_auth_user", {})
+    _current_role = _current_user.get("role", "viewer")
+    _current_perms = _current_user.get("permissions", [])
+
+    def _has_perm(perm: str) -> bool:
+        return perm in _current_perms
+else:
+    # No auth module — full access
+    _current_user = {"username": "local", "role": "admin", "display_name": "Local User",
+                     "permissions": ["view_dashboard", "analyze_servers", "export_data",
+                                     "ai_analysis", "manage_users", "view_audit_log",
+                                     "bulk_upload", "scenario_analysis", "auto_discovery"]}
+    _current_role = "admin"
+    _current_perms = _current_user["permissions"]
+
+    def _has_perm(perm: str) -> bool:
+        return True
+
 st.markdown("""
 <div class="main-header">
-    <h1>Cloud Migration Cost Analyzer</h1>
+    <h1>Infosys Cobalt &mdash; Migration Analyzer</h1>
     <p>Enterprise Right-Sizing &bull; Real-Time Pricing &bull; AI Recommendations &mdash; AWS, Azure &amp; Azure Local</p>
 </div>
 """, unsafe_allow_html=True)
@@ -354,6 +444,14 @@ Azure Local Annual = On-Prem HW & Ops (excl. OS licensing)
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
+    # User info and logout
+    if HAS_AUTH and _current_user.get("username") != "local":
+        _role_label = _auth.get_role_label(_current_role) if HAS_AUTH else _current_role
+        st.markdown(f"**{_current_user.get('display_name', 'User')}** &nbsp; `{_role_label}`")
+        if st.button("Logout", key="logout_btn"):
+            st.session_state.pop("_auth_user", None)
+            st.rerun()
+        st.markdown("---")
     st.markdown("### Configuration")
     st.markdown("---")
     st.markdown("**Claude AI**")
@@ -1134,12 +1232,14 @@ with tab_upload:
                            f"Estimated: ~{n_rows * 4 / 1000:.0f}s compute.")
 
             with st.expander("📋 Preview Input Data", expanded=False):
-                st.dataframe(df.head(100), use_container_width=True, height=250)
-                if n_rows > 100:
-                    st.caption(f"Showing first 100 of {n_rows:,}")
+                _paginated_dataframe(df, "input_preview", page_size=100, height_cap=300)
 
-            if st.button("🚀 Analyze All Servers (Streaming)", type="primary", key="batch_go"):
+            _can_analyze = _has_perm("analyze_servers")
+            if not _can_analyze:
+                st.warning("Your role does not have permission to analyze servers. Contact an admin.")
+            if st.button("🚀 Analyze All Servers (Streaming)", type="primary", key="batch_go", disabled=not _can_analyze):
                 results = []
+                _batch_errors = []
 
                 # Progress bar
                 prog = st.progress(0, text="Starting analysis…")
@@ -1149,32 +1249,61 @@ with tab_upload:
                 table_placeholder = st.empty()
                 cards_container = st.container()
 
-                for i, row in df.iterrows():
-                    inp = build_inputs(row.to_dict())
-                    out = calculate_all_outputs(inp)
-                    results.append({"inputs": inp, "outputs": out})
+                # Build all inputs first
+                all_inputs = [build_inputs(row.to_dict()) for _, row in df.iterrows()]
 
-                    # Update progress
-                    done = len(results)
-                    prog.progress(done / n_rows,
-                                  text=f"Server {done}/{n_rows}: **{inp.get('host_name', '')}** → `{out['recomm_instance_type']}`")
+                # Use parallel processing for large batches (>5 servers)
+                if HAS_ASYNC and n_rows > 5:
+                    processor = BatchProcessor(max_workers=4, chunk_size=10)
 
-                    # Update streaming table every 5 servers or at the end
-                    if done % 5 == 0 or done == n_rows or done <= 10:
+                    def _progress_cb(done, total, hostname, result):
+                        prog.progress(done / total,
+                                      text=f"Server {done}/{total}: **{hostname}** → `{result['outputs']['recomm_instance_type']}`")
+
+                    results, _batch_errors = processor.process_batch(
+                        all_inputs, calculate_all_outputs,
+                        progress_callback=_progress_cb,
+                    )
+                    # Update table after parallel run
+                    if results:
                         display_rows = [build_output_row(r["inputs"], r["outputs"]) for r in results]
                         table_placeholder.dataframe(
                             pd.DataFrame(display_rows),
                             use_container_width=True,
-                            height=min(400, 40 + done * 35))
-
-                    # Show server card for first 10 and last one
-                    if done <= 10 or done == n_rows:
+                            height=min(400, 40 + len(results) * 35))
+                    # Show first 10 server cards
+                    for idx, r in enumerate(results[:10]):
                         with cards_container:
-                            render_server_card(inp, out, done)
+                            render_server_card(r["inputs"], r["outputs"], idx + 1)
+                else:
+                    # Sequential processing (small batches or async unavailable)
+                    for inp in all_inputs:
+                        out = calculate_all_outputs(inp)
+                        results.append({"inputs": inp, "outputs": out})
+
+                        done = len(results)
+                        prog.progress(done / n_rows,
+                                      text=f"Server {done}/{n_rows}: **{inp.get('host_name', '')}** → `{out['recomm_instance_type']}`")
+
+                        if done % 5 == 0 or done == n_rows or done <= 10:
+                            display_rows = [build_output_row(r["inputs"], r["outputs"]) for r in results]
+                            table_placeholder.dataframe(
+                                pd.DataFrame(display_rows),
+                                use_container_width=True,
+                                height=min(400, 40 + done * 35))
+
+                        if done <= 10 or done == n_rows:
+                            with cards_container:
+                                render_server_card(inp, out, done)
 
                 st.session_state["_batch"] = results
                 prog.empty()
-                st.success(f"✅ **{len(results):,} servers** analyzed! Results below and in **📊 Batch Results** tab.")
+                _err_msg = f" ({len(_batch_errors)} errors)" if _batch_errors else ""
+                st.success(f"✅ **{len(results):,} servers** analyzed{_err_msg}! Results below and in **📊 Batch Results** tab.")
+                if _batch_errors:
+                    with st.expander(f"⚠️ {len(_batch_errors)} servers failed", expanded=False):
+                        for err in _batch_errors:
+                            st.error(f"**{err['inputs'].get('host_name', 'Unknown')}**: {err['error']}")
 
                 # Final export buttons right here
                 st.markdown('<div class="section-header">📥 Export</div>', unsafe_allow_html=True)
@@ -1280,31 +1409,44 @@ with tab_manual:
         inp, out = st.session_state["_m_inp"], st.session_state["_m_out"]
         render_single_output(inp, out)
 
-        if show_ai and api_key:
+        if show_ai and api_key and _has_perm("ai_analysis"):
             st.markdown('<div class="section-header">🤖 AI Migration Analysis</div>', unsafe_allow_html=True)
             st.caption("AI analyzes sizing, PaaS vs IaaS, cost optimization, migration gaps, and risk assessment")
             if st.button("🧠 Generate AI Analysis (Sizing + PaaS/IaaS + Gaps)", type="primary", key="ai_m"):
-                with st.spinner("Claude analyzing sizing, PaaS/IaaS fit, cost optimization, gaps, and migration strategy…"):
-                    rec = get_ai_recommendation(inp, out, api_key)
-                render_ai_analysis(rec, "Server Migration Analysis")
+                # Rate limit AI calls
+                _ai_allowed = True
+                if HAS_AUTH:
+                    _ai_allowed, _ai_remaining = ai_rate_limiter.check_limit(
+                        _current_user.get("username", "anon"))
+                if not _ai_allowed:
+                    st.warning("⏳ AI rate limit reached (10 calls/hour). Please wait before trying again.")
+                else:
+                    with st.spinner("Claude analyzing sizing, PaaS/IaaS fit, cost optimization, gaps, and migration strategy…"):
+                        rec = get_ai_recommendation(inp, out, api_key)
+                    render_ai_analysis(rec, "Server Migration Analysis")
         elif show_ai and not api_key:
             st.info("💡 Add `ANTHROPIC_API_KEY` to `.streamlit/secrets.toml` or enter in sidebar.")
+        elif show_ai and not _has_perm("ai_analysis"):
+            st.info("🔒 AI analysis requires Analyst or Admin role.")
 
         st.markdown('<div class="section-header">📥 Export</div>', unsafe_allow_html=True)
-        results = [{"inputs": inp, "outputs": out}]
-        ce1, ce2, ce3 = st.columns(3)
-        with ce1:
-            st.download_button("📥 Download Excel", generate_excel(results),
-                f"{inp.get('host_name','server')}_analysis.xlsx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        with ce2:
-            st.download_button("📥 Download CSV", generate_csv(results),
-                f"{inp.get('host_name','server')}_analysis.csv", "text/csv")
-        if HAS_PDF:
-            with ce3:
-                pdf_data = generate_pdf_report(results, currency_symbol=csym, currency_multiplier=cmult)
-                st.download_button("📥 Download PDF", pdf_data,
-                    f"{inp.get('host_name','server')}_report.pdf", "application/pdf", key="pdf_single")
+        if not _has_perm("export_data"):
+            st.info("🔒 Export requires Viewer, Analyst, or Admin role.")
+        else:
+            results = [{"inputs": inp, "outputs": out}]
+            ce1, ce2, ce3 = st.columns(3)
+            with ce1:
+                st.download_button("📥 Download Excel", generate_excel(results),
+                    f"{inp.get('host_name','server')}_analysis.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            with ce2:
+                st.download_button("📥 Download CSV", generate_csv(results),
+                    f"{inp.get('host_name','server')}_analysis.csv", "text/csv")
+            if HAS_PDF:
+                with ce3:
+                    pdf_data = generate_pdf_report(results, currency_symbol=csym, currency_multiplier=cmult)
+                    st.download_button("📥 Download PDF", pdf_data,
+                        f"{inp.get('host_name','server')}_report.pdf", "application/pdf", key="pdf_single")
 
 
 # ── TAB 3: BATCH RESULTS ────────────────────────────────────────────────────
@@ -1457,7 +1599,7 @@ with tab_results:
             if sel_env != "All":
                 filtered = df_summary[df_summary["Environment"] == sel_env]
                 st.caption(f"Showing {len(filtered):,} servers in **{sel_env}**")
-                st.dataframe(filtered, use_container_width=True, height=min(400, 50 + len(filtered) * 35))
+                _paginated_dataframe(filtered, "drill_env_tbl", page_size=100, height_cap=400)
 
         elif view_mode == "By Server Type":
             agg_df = _agg_table("Server Type")
@@ -1466,7 +1608,7 @@ with tab_results:
             if sel_type != "All":
                 filtered = df_summary[df_summary["Server Type"] == sel_type]
                 st.caption(f"Showing {len(filtered):,} **{sel_type}** servers")
-                st.dataframe(filtered, use_container_width=True, height=min(400, 50 + len(filtered) * 35))
+                _paginated_dataframe(filtered, "drill_type_tbl", page_size=100, height_cap=400)
 
         elif view_mode == "By Workload Family":
             agg_df = _agg_table("Family")
@@ -1475,7 +1617,7 @@ with tab_results:
             if sel_fam != "All":
                 filtered = df_summary[df_summary["Family"] == sel_fam]
                 st.caption(f"Showing {len(filtered):,} **{sel_fam}** workloads")
-                st.dataframe(filtered, use_container_width=True, height=min(400, 50 + len(filtered) * 35))
+                _paginated_dataframe(filtered, "drill_fam_tbl", page_size=100, height_cap=400)
 
         elif view_mode == "Top Savings":
             st.caption(f"Top 50 servers with highest annual savings (of {n:,} total)")
@@ -1493,7 +1635,7 @@ with tab_results:
                 mask = df_summary.apply(lambda row: search_q.lower() in str(row.values).lower(), axis=1)
                 matched = df_summary[mask]
                 st.caption(f"Found **{len(matched):,}** matches for \"{search_q}\"")
-                st.dataframe(matched, use_container_width=True, height=min(500, 50 + len(matched) * 35))
+                _paginated_dataframe(matched, "search_tbl", page_size=100, height_cap=500)
             else:
                 st.caption(f"Enter a search term to filter {n:,} servers. Or use the views above to browse by group.")
 
@@ -1552,13 +1694,20 @@ with tab_results:
                 st.plotly_chart(fig_t, use_container_width=True)
 
         # ── AI STRATEGY ─────────────────────────────────────────────────────
-        if show_ai and api_key:
+        if show_ai and api_key and _has_perm("ai_analysis"):
             st.markdown('<div class="section-header">🤖 AI Portfolio Strategy</div>', unsafe_allow_html=True)
             st.caption("AI analyzes sizing optimization, PaaS vs IaaS for each workload, migration gaps, wave planning, and financial projections")
             if st.button("🧠 Generate Executive Decision Brief (Sizing + PaaS/IaaS + Gaps)", type="primary", key="ai_b"):
-                with st.spinner("Claude analyzing portfolio: sizing, PaaS/IaaS, gaps, wave plan, risk register, 3-year projection…"):
-                    s = get_batch_ai_summary(results, api_key)
-                render_ai_analysis(s, "Executive Portfolio Analysis")
+                _ai_allowed = True
+                if HAS_AUTH:
+                    _ai_allowed, _ai_remaining = ai_rate_limiter.check_limit(
+                        _current_user.get("username", "anon"))
+                if not _ai_allowed:
+                    st.warning("⏳ AI rate limit reached (10 calls/hour). Please wait before trying again.")
+                else:
+                    with st.spinner("Claude analyzing portfolio: sizing, PaaS/IaaS, gaps, wave plan, risk register, 3-year projection…"):
+                        s = get_batch_ai_summary(results, api_key)
+                    render_ai_analysis(s, "Executive Portfolio Analysis")
 
         # ── WAVE PLAN & ROI ─────────────────────────────────────────────────
         if show_enhanced and HAS_SCENARIOS:
@@ -1601,7 +1750,7 @@ with tab_results:
         # ── FULL TABLE (collapsed for large datasets) ───────────────────────
         with st.expander(f"📋 Full Output Table ({n:,} rows × {len(build_output_row(results[0]['inputs'], results[0]['outputs']))} columns)", expanded=(n <= 100)):
             out_rows = [build_output_row(r["inputs"], r["outputs"]) for r in results]
-            st.dataframe(pd.DataFrame(out_rows), use_container_width=True, height=min(500, 50 + min(n, 200) * 35))
+            _paginated_dataframe(pd.DataFrame(out_rows), "full_tbl", page_size=100, height_cap=500)
 
         # ── EXPORT ──────────────────────────────────────────────────────────
         st.markdown('<div class="section-header">📥 Export Portfolio</div>', unsafe_allow_html=True)
@@ -1635,7 +1784,9 @@ with tab_results:
 # TAB 4: SCENARIOS & PROJECTIONS (requires scenario_engine, run_history)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_scenarios:
-  if not HAS_SCENARIOS:
+  if not _has_perm("scenario_analysis"):
+    st.info("🔒 Scenario analysis requires Analyst or Admin role.")
+  elif not HAS_SCENARIOS:
     st.info("Scenarios module not available. Ensure `scenario_engine.py` and `run_history.py` are deployed.")
   else:
     st.markdown('<div class="section-header">🔄 Scenario Analysis & Financial Projections</div>', unsafe_allow_html=True)
@@ -1762,7 +1913,9 @@ with tab_scenarios:
 # TAB 5: AUTO-DISCOVERY
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_discovery:
-  if not HAS_DISCOVERY:
+  if not _has_perm("auto_discovery"):
+    st.info("🔒 Auto-discovery requires Admin role.")
+  elif not HAS_DISCOVERY:
     st.info("Discovery module not available. Ensure `discovery.py` is deployed.")
   else:
     st.markdown('<div class="section-header">🔍 Matilda Server Discovery</div>', unsafe_allow_html=True)
