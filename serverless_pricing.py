@@ -161,12 +161,23 @@ def estimate_container_cost(
     instance_usage: str = "24x7",
     region_multiplier: float = 1.0,
     use_spot: bool = False,
+    server_type: str = "Application Server",
 ) -> Dict:
     """
     Estimate container (Fargate/Container Apps) cost.
 
     Right-sizes containers based on actual utilization.
     """
+    # DB/Cache servers are not suitable for containerization — use managed services
+    if server_type in ("Database Server", "Cache Server"):
+        return {
+            "suitable": False,
+            "reason": f"{server_type} — use managed PaaS instead of containers",
+            "service": "N/A", "container_vcpu": 0, "container_memory_gb": 0,
+            "usage_hours_month": 0, "use_spot": False,
+            "vcpu_cost": 0, "memory_cost": 0, "monthly_cost": 0, "annual_cost": 0,
+            "extras": {},
+        }
     # Right-size for containers (tighter than VMs)
     needed_vcpu = max(0.25, vcpu_count * (avg_cpu_usage / 100.0) * 1.2)
     needed_mem = max(0.5, memory_gb * (avg_memory_usage / 100.0) * 1.2)
@@ -243,26 +254,33 @@ def calculate_all_modern_options(
 
     container = estimate_container_cost(
         cloud, vcpu_count, avg_cpu_usage, memory_gb, avg_memory_usage,
-        instance_usage, region_multiplier,
+        instance_usage, region_multiplier, server_type=server_type,
     )
 
     container_spot = estimate_container_cost(
         cloud, vcpu_count, avg_cpu_usage, memory_gb, avg_memory_usage,
-        instance_usage, region_multiplier, use_spot=True,
+        instance_usage, region_multiplier, use_spot=True, server_type=server_type,
     )
 
-    options = [
-        {"name": "Container (On-Demand)", "monthly": container["monthly_cost"],
-         "annual": container["annual_cost"], "details": container},
-        {"name": "Container (Spot/Preemptible)", "monthly": container_spot["monthly_cost"],
-         "annual": container_spot["annual_cost"], "details": container_spot},
-    ]
-
-    if serverless["suitable"]:
+    options = []
+    if container.get("suitable", True):
+        options.append({"name": "Container (On-Demand)", "monthly": container["monthly_cost"],
+                        "annual": container["annual_cost"], "details": container})
+    if container_spot.get("suitable", True):
+        options.append({"name": "Container (Spot/Preemptible)", "monthly": container_spot["monthly_cost"],
+                        "annual": container_spot["annual_cost"], "details": container_spot})
+    if serverless.get("suitable"):
         options.insert(0, {
             "name": "Serverless", "monthly": serverless["monthly_cost"],
             "annual": serverless["annual_cost"], "details": serverless,
         })
+
+    if not options:
+        return {
+            "serverless": serverless, "container": container, "container_spot": container_spot,
+            "all_options": [], "recommended": "Managed Service (PaaS)",
+            "recommended_monthly": 0, "recommended_annual": 0,
+        }
 
     options.sort(key=lambda x: x["monthly"])
     best = options[0]

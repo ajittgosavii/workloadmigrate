@@ -505,6 +505,15 @@ with st.sidebar:
     show_charts = st.toggle("Show Charts", value=True)
     show_ai = st.toggle("AI Recommendations", value=True)
     show_enhanced = st.toggle("Enhanced Analysis", value=True, help="Network, DR/Backup, Storage Tiers, Serverless")
+    show_budget = st.toggle("Budget-Grade Analysis", value=False, help="Support plans, migration labor, confidence ranges, multi-year TCO")
+    if show_budget:
+        budget_support_tier = st.selectbox("Support Plan",
+            ["business", "enterprise", "developer", "none"],
+            index=0, help="AWS: Business/Enterprise/Developer | Azure: Standard/Professional Direct")
+        budget_years = st.slider("Budget Projection (years)", 1, 5, 3)
+    else:
+        budget_support_tier = "business"
+        budget_years = 3
     # Enhanced currency support with 20 currencies
     currency_options = ["USD ($)", "CAD (C$)", "EUR (€)", "GBP (£)", "AUD (A$)",
                         "JPY (¥)", "INR (₹)", "SGD (S$)", "CHF (CHF)",
@@ -615,6 +624,9 @@ def build_inputs(row: dict) -> Dict:
         "avg_network_throughput": sf(row.get("Average Network Throughput (Mbps)", 100)),
         "total_network_throughput": sf(row.get("Total Network Throughput (Mbps)", 1000)),
         "avg_disk_iops": sf(row.get("Average Disk IOPS", 500)),
+        # Budget-grade parameters (injected from sidebar)
+        "support_tier": budget_support_tier,
+        "budget_years": budget_years,
     }
 
 
@@ -665,6 +677,9 @@ def build_output_row(inp: Dict, out: Dict) -> Dict:
         "Azure Local Windows Annual ($)": round(out["azure_local"]["windows_total_annual"] * cmult, 2),
         "Azure Local AHB Annual ($)": round(out["azure_local"]["ahb_total_annual"] * cmult, 2),
         "On-Prem Yearly Cost ($)": round(out["on_prem_yearly_cost"] * cmult, 2),
+        "DB Licensing ($/yr)": round(out.get("db_licensing_annual", 0) * cmult, 2),
+        "DB License Type": out.get("db_licensing_name", "None"),
+        "DR Strategy": out.get("_dr_strategy", "pilot_light"),
         "Target Operating System": out["target_operating_system"],
         # Enhanced cost columns
         "Network Egress ($/mo)": round(out.get("network_costs", {}).get("total_monthly", 0) * cmult, 2),
@@ -682,6 +697,22 @@ def build_output_row(inp: Dict, out: Dict) -> Dict:
         # All-In Cloud Annual (IaaS + Network + DR/Backup)
         "AWS All-In Annual ($)": round((out["cross_provider"]["AWS"]["annual_3yr_ri"] + out.get("network_costs", {}).get("total_annual", 0) + out.get("dr_backup_costs", {}).get("combined_annual", 0)) * cmult, 2),
         "Azure All-In Annual ($)": round((out["cross_provider"]["Azure"]["annual_3yr_ri"] + out.get("network_costs", {}).get("total_annual", 0) + out.get("dr_backup_costs", {}).get("combined_annual", 0)) * cmult, 2),
+        # Budget-Grade columns
+        "Support Plan ($/yr)": round(out.get("budget_support", {}).get("annual_cost", 0) * cmult, 2),
+        "Migration Labor ($)": round(out.get("budget_migration_labor", {}).get("migration_labor", 0) * cmult, 2),
+        "Migration Testing ($)": round(out.get("budget_migration_labor", {}).get("testing_validation", 0) * cmult, 2),
+        "Parallel Run ($)": round(out.get("budget_migration_labor", {}).get("parallel_run", 0) * cmult, 2),
+        "Total One-Time ($)": round(out.get("budget_total_one_time", 0) * cmult, 2),
+        "AWS Budget All-In ($/yr)": round(out.get("budget_aws_all_in_annual", 0) * cmult, 2),
+        "Azure Budget All-In ($/yr)": round(out.get("budget_azure_all_in_annual", 0) * cmult, 2),
+        "AWS Low P10 ($/yr)": round(out.get("budget_aws_confidence", {}).get("low_annual", 0) * cmult, 2),
+        "AWS Expected+Contingency ($/yr)": round(out.get("budget_aws_confidence", {}).get("budget_annual", 0) * cmult, 2),
+        "AWS High P90 ($/yr)": round(out.get("budget_aws_confidence", {}).get("high_annual", 0) * cmult, 2),
+        "Azure Low P10 ($/yr)": round(out.get("budget_azure_confidence", {}).get("low_annual", 0) * cmult, 2),
+        "Azure Expected+Contingency ($/yr)": round(out.get("budget_azure_confidence", {}).get("budget_annual", 0) * cmult, 2),
+        "Azure High P90 ($/yr)": round(out.get("budget_azure_confidence", {}).get("high_annual", 0) * cmult, 2),
+        "Budget Best Cloud": out.get("budget_best_cloud", ""),
+        "Break-Even Year": out.get("budget_summary", {}).get("breakeven_year", ""),
     }
 
 
@@ -741,6 +772,7 @@ def render_server_card(inp: Dict, out: Dict, idx: int):
                 <div class="cb-row"><span>🏢 Facility/Rack (colocation share)</span><span>${bk.get('facility',0):,.2f}</span></div>
                 <div class="cb-row"><span>👷 Admin & Labor</span><span>${bk.get('admin_labor',0):,.2f}</span></div>
                 <div class="cb-row"><span>📜 OS ({bk.get('licensing_name', 'Linux')})</span><span>${bk.get('annual_licensing',0):,.2f}</span></div>
+                <div class="cb-row"><span>🗄️ DB License ({bk.get('db_licensing_name', 'None')})</span><span>${bk.get('db_licensing_annual',0):,.2f}</span></div>
                 <div class="cb-row cb-total"><span>Total Annual On-Prem Cost</span><span>${out['on_prem_yearly_cost']:,.2f}</span></div>
             </div>""", unsafe_allow_html=True)
 
@@ -803,6 +835,7 @@ def generate_excel(results: List[Dict]) -> bytes:
             "  Facility/Rack": round(bk.get("facility", 0), 2),
             "  Admin/Labor": round(bk.get("admin_labor", 0), 2),
             "  OS Licensing": round(bk.get("annual_licensing", 0), 2),
+            "  DB Licensing": round(bk.get("db_licensing_annual", 0), 2),
             "AWS Annual (3yr RI) ($)": round(aws_ann, 2),
             "AWS Instance": o["cross_provider"]["AWS"]["instance_type"],
             "Azure Annual (3yr RI) ($)": round(az_ann, 2),
@@ -815,10 +848,38 @@ def generate_excel(results: List[Dict]) -> bytes:
             "Savings %": round((sav / op * 100) if op > 0 else 0, 1),
         })
 
+    # Budget Summary rows (if budget data is available)
+    budget_rows = []
+    if results and results[0]["outputs"].get("budget_support"):
+        for r in results:
+            o = r["outputs"]
+            budget_rows.append({
+                "Host": r["inputs"]["host_name"],
+                "Cloud Provider": r["inputs"].get("cloud_provider", ""),
+                "Support Plan ($/yr)": round(o.get("budget_support", {}).get("annual_cost", 0), 2),
+                "Migration Labor ($)": round(o.get("budget_migration_labor", {}).get("migration_labor", 0), 2),
+                "Testing ($)": round(o.get("budget_migration_labor", {}).get("testing_validation", 0), 2),
+                "Training ($)": round(o.get("budget_migration_labor", {}).get("training", 0), 2),
+                "Parallel Run ($)": round(o.get("budget_migration_labor", {}).get("parallel_run", 0), 2),
+                "Total One-Time ($)": round(o.get("budget_total_one_time", 0), 2),
+                "AWS Budget All-In ($/yr)": round(o.get("budget_aws_all_in_annual", 0), 2),
+                "Azure Budget All-In ($/yr)": round(o.get("budget_azure_all_in_annual", 0), 2),
+                "AWS Low P10 ($/yr)": round(o.get("budget_aws_confidence", {}).get("low_annual", 0), 2),
+                "AWS Budget P50+10% ($/yr)": round(o.get("budget_aws_confidence", {}).get("budget_annual", 0), 2),
+                "AWS High P90 ($/yr)": round(o.get("budget_aws_confidence", {}).get("high_annual", 0), 2),
+                "Azure Low P10 ($/yr)": round(o.get("budget_azure_confidence", {}).get("low_annual", 0), 2),
+                "Azure Budget P50+10% ($/yr)": round(o.get("budget_azure_confidence", {}).get("budget_annual", 0), 2),
+                "Azure High P90 ($/yr)": round(o.get("budget_azure_confidence", {}).get("high_annual", 0), 2),
+                "Best Cloud": o.get("budget_best_cloud", ""),
+                "Break-Even Year": o.get("budget_summary", {}).get("breakeven_year", ""),
+            })
+
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         pd.DataFrame(inp_rows).to_excel(writer, sheet_name="Input Data", index=False)
         pd.DataFrame(out_rows).to_excel(writer, sheet_name="Output — Dynamic", index=False)
         pd.DataFrame(sum_rows).to_excel(writer, sheet_name="Cost Summary", index=False)
+        if budget_rows:
+            pd.DataFrame(budget_rows).to_excel(writer, sheet_name="Budget Summary", index=False)
 
         notices = [
             "COMPLIANCE & DATA HANDLING NOTICE", "",
@@ -833,7 +894,9 @@ def generate_excel(results: List[Dict]) -> bytes:
             "    — Electricity: US EIA industrial average (eia.gov)",
             "  Facility/Rack: $1,200/server/yr — ENCOR Advisors, Brightlio Colocation Guide (2025)",
             "  Admin/Labor: $1,500/server/yr — Gartner IT staffing benchmarks",
-            "  OS Licensing: Windows $5.50/vCPU/mo, RHEL $3.00, SUSE $2.50 — Dell configurator (dell.com)", "",
+            "  OS Licensing: Windows $5.50/vCPU/mo, RHEL $3.00, SUSE $2.50 — Dell configurator (dell.com)",
+            "  DB Licensing: Oracle $9,975/vCPU/yr, SQL Server Ent $3,400/vCPU/yr, Std $890/vCPU/yr,",
+            "    MongoDB $10,000/server/yr, Redis $5,000/server/yr, MySQL/PostgreSQL/MariaDB $0 (open source)", "",
             "CLOUD PRICING: Azure Retail Prices API (live) + AWS reference catalog (fallback).", "",
             "AZURE LOCAL (formerly Azure Stack HCI) PRICING:",
             "  Host Service Fee: $10/physical core/month — azure.microsoft.com/pricing/details/azure-local/",
@@ -841,14 +904,28 @@ def generate_excel(results: List[Dict]) -> bytes:
             "  Azure Hybrid Benefit: WS Datacenter w/ Software Assurance waives host + WS subscription fees",
             "  AKS on Azure Local: included at no extra charge (2402+ release, effective Jan 2025)",
             "  60-day free trial after registration", "",
-            "DISCLAIMER: Indicative pricing. Verify with official cloud calculators.",
+            "DISCLAIMER: Indicative pricing. Verify with official cloud calculators.", "",
+            "BUDGET-GRADE METHODOLOGY:",
+            "  Support Plans: AWS Business (tiered 10%/7%/5%/3%) — aws.amazon.com/premiumsupport/pricing/",
+            "    Azure Standard $100/mo — azure.microsoft.com/en-us/support/plans/",
+            "  Migration Labor: $5K-$25K/server base (Gartner Migration TCO, AWS MAP, Azure Migrate)",
+            "    Complexity surcharges: DB Server 1.5x, Mail 1.3x, File 1.2x, Oracle 3.0x, SQL Server 2.0x",
+            "  Testing/QA: 15-20% of labor cost by migration type",
+            "  Training: $3,500/person × 0.1 allocation per server",
+            "  Parallel Run: 2 months on-prem (Production), 1 month (non-Production)",
+            "  Confidence Ranges: P10 (-15%), P50 (base), P90 (+25%) — Gartner, McKinsey",
+            "  Contingency: 10% of expected (P50) — industry standard budget reserve",
+            "  Price Trends: Cloud -5%/yr, On-prem HW +3%/yr, Power +4%/yr, Labor +5%/yr",
         ]
         pd.DataFrame({"Notice": notices}).to_excel(writer, sheet_name="Compliance Notice", index=False, header=False)
 
         wb = writer.book
         hf = Font(name="Arial", bold=True, color="FFFFFF", size=10)
         hfill = PatternFill("solid", fgColor="1B4F72")
-        for ws_name in ["Input Data", "Output — Dynamic", "Cost Summary"]:
+        sheet_names = ["Input Data", "Output — Dynamic", "Cost Summary"]
+        if budget_rows:
+            sheet_names.append("Budget Summary")
+        for ws_name in sheet_names:
             ws = wb[ws_name]
             for cell in ws[1]:
                 cell.font = hf; cell.fill = hfill
@@ -1004,6 +1081,8 @@ def render_single_output(inputs: Dict, outputs: Dict):
                 <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5E6B7A;">↳ {sources.get('labor','Gartner benchmarks, Sherweb TCO')}</div>
                 <div class="cb-row"><span>📜 OS Licensing ({bk.get('licensing_name','Linux')})</span><span>${bk['annual_licensing']:,.2f}</span></div>
                 <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5E6B7A;">↳ {sources.get('licensing','Dell configurator pricing')}</div>
+                <div class="cb-row"><span>🗄️ DB Software ({bk.get('db_licensing_name','None')})</span><span>${bk.get('db_licensing_annual',0):,.2f}</span></div>
+                <div class="cb-row" style="padding-left:24px;font-size:.78rem;color:#5E6B7A;">↳ {sources.get('db_licensing','Oracle/MS/MongoDB/Redis official price lists')}</div>
                 <div class="cb-row cb-total"><span>On-Prem Yearly Cost</span><span>${outputs['on_prem_yearly_cost']:,.2f}</span></div>
             </div>""", unsafe_allow_html=True)
     with t2:
@@ -1167,6 +1246,113 @@ def render_single_output(inputs: Dict, outputs: Dict):
             mc("All-In Savings", fp(abs(savings_all_in)),
                f"{'↓' if savings_all_in > 0 else '↑'} vs On-Prem (conservative)",
                "" if savings_all_in > 0 else "metric-red")
+
+    # ── BUDGET-GRADE SECTION (guarded by sidebar toggle) ──────────────────
+    if show_budget and outputs.get("budget_support"):
+        st.markdown('<div class="section-header">💼 Budget-Grade Analysis</div>', unsafe_allow_html=True)
+
+        # Support Plan Costs
+        sup = outputs.get("budget_support", {})
+        su1, su2, su3 = st.columns(3)
+        with su1:
+            mc("Support Plan", sup.get("support_tier", "N/A").title(),
+               f"{fp(sup.get('annual_cost', 0))}/yr ({sup.get('pct_of_spend', 0):.1f}% of spend)")
+        with su2:
+            aws_sup = outputs.get("cross_provider", {}).get("AWS", {}).get("support", {})
+            mc("AWS Support", fp(aws_sup.get("annual_cost", 0)) + "/yr",
+               f"{aws_sup.get('support_tier', 'business').title()} tier")
+        with su3:
+            az_sup = outputs.get("cross_provider", {}).get("Azure", {}).get("support", {})
+            mc("Azure Support", fp(az_sup.get("annual_cost", 0)) + "/yr",
+               f"{az_sup.get('support_tier', 'standard').title()} tier", "metric-blue")
+
+        # Migration One-Time Costs
+        st.markdown('<div class="section-header">🔧 Migration One-Time Costs</div>', unsafe_allow_html=True)
+        mig = outputs.get("budget_migration_labor", {})
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            mc("Migration Labor", fp(mig.get("migration_labor", 0)),
+               f"~{mig.get('estimated_duration_weeks', 0):.0f} weeks")
+        with m2:
+            mc("Testing/QA", fp(mig.get("testing_validation", 0)),
+               f"{mig.get('complexity_factors', {}).get('server_type_mult', 1):.1f}x complexity")
+        with m3:
+            mc("Training", fp(mig.get("training", 0)),
+               "$3,500/person prorated")
+        with m4:
+            mc("Parallel Run", fp(mig.get("parallel_run", 0)),
+               "On-prem during cutover")
+        with m5:
+            mc("Total One-Time", fp(outputs.get("budget_total_one_time", 0)),
+               "Labor + Testing + Training + Transfer", "metric-yellow")
+
+        # Confidence Ranges
+        st.markdown('<div class="section-header">🎯 Confidence Ranges (Annual)</div>', unsafe_allow_html=True)
+        best_cloud = outputs.get("budget_best_cloud", "AWS")
+        best_conf = outputs.get(f"budget_{best_cloud.lower()}_confidence", {})
+        cr1, cr2, cr3, cr4 = st.columns(4)
+        with cr1:
+            mc(f"{best_cloud} Low (P10)", fp(best_conf.get("low_annual", 0)) + "/yr",
+               "Best case: EDP discounts, spot")
+        with cr2:
+            mc(f"{best_cloud} Expected (P50)", fp(best_conf.get("expected_annual", 0)) + "/yr",
+               "Base calculation (3yr RI)")
+        with cr3:
+            mc(f"{best_cloud} High (P90)", fp(best_conf.get("high_annual", 0)) + "/yr",
+               "Worst case: overflows, growth", "metric-red")
+        with cr4:
+            mc("Budget (P50 + 10%)", fp(best_conf.get("budget_annual", 0)) + "/yr",
+               f"Incl. {fp(best_conf.get('contingency_amount', 0))} contingency", "metric-yellow")
+
+        # Multi-Year Budget Projection
+        bs = outputs.get("budget_summary", {})
+        if bs:
+            yrs = bs.get("projection_years", 3)
+            st.markdown(f'<div class="section-header">📅 {yrs}-Year Budget Projection</div>', unsafe_allow_html=True)
+
+            bp1, bp2, bp3, bp4 = st.columns(4)
+            with bp1:
+                mc("Year 0 (Migration)", fp(bs["year_0"]["total"]),
+                   f"One-time: {fp(bs['year_0']['migration_one_time'])} + Cloud: {fp(bs['year_0']['cloud_prorated'])}", "metric-yellow")
+            with bp2:
+                mc(f"{yrs}-Year Cloud Total", fp(bs["total_cloud_n_year"]),
+                   f"Incl. Year 0 migration + {yrs} years run rate")
+            with bp3:
+                mc(f"{yrs}-Year On-Prem Total", fp(bs["total_on_prem_n_year"]),
+                   "With inflation (HW +3%, power +4%, labor +5%/yr)", "metric-red")
+            with bp4:
+                be = bs.get("breakeven_year")
+                be_label = f"Year {be}" if be else "Year 0"
+                mc(f"{yrs}-Year Savings", fp(bs["total_savings_n_year"]),
+                   f"Break-even: {be_label}", "" if bs["total_savings_n_year"] > 0 else "metric-red")
+
+            # Year-by-year table
+            with st.expander(f"📊 Year-by-Year Breakdown ({yrs} years)", expanded=False):
+                import pandas as _pd
+                yr_data = []
+                yr_data.append({
+                    "Year": "Year 0", "Cloud Total": fp(bs["year_0"]["total"]),
+                    "On-Prem Total": fp(bs["year_0"]["on_prem_prorated"]),
+                    "Annual Savings": fp(bs["year_0"]["on_prem_prorated"] - bs["year_0"]["total"]),
+                    "Cumulative Cloud": fp(bs["year_0"]["total"]),
+                    "Cumulative On-Prem": fp(bs["year_0"]["on_prem_prorated"]),
+                    "Cumulative Savings": fp(bs["year_0"]["on_prem_prorated"] - bs["year_0"]["total"]),
+                })
+                for yr in bs.get("yearly", []):
+                    yr_data.append({
+                        "Year": f"Year {yr['year']}",
+                        "Cloud Total": fp(yr["total_cloud"]),
+                        "On-Prem Total": fp(yr["on_prem_projected"]),
+                        "Annual Savings": fp(yr["annual_savings"]),
+                        "Cumulative Cloud": fp(yr["cumulative_cloud"]),
+                        "Cumulative On-Prem": fp(yr["cumulative_on_prem"]),
+                        "Cumulative Savings": fp(yr["cumulative_savings"]),
+                    })
+                st.dataframe(_pd.DataFrame(yr_data), use_container_width=True, hide_index=True)
+
+        st.caption(f"📋 Sources: AWS Premium Support (aws.amazon.com/premiumsupport/pricing/) | "
+                   f"Azure Support Plans (azure.microsoft.com/en-us/support/plans/) | "
+                   f"Gartner Migration TCO | Cloud price trends: -5%/yr (historical)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1381,6 +1567,7 @@ with tab_manual:
             "vcpu_count": m_vcpu, "avg_cpu_usage": m_acpu, "memory_gb": m_mem, "avg_memory_usage": m_amem,
             "total_storage_gb": m_stor, "storage_usage_pct": m_spct,
             "avg_network_throughput": m_net, "total_network_throughput": m_tnet, "avg_disk_iops": m_iops,
+            "support_tier": budget_support_tier, "budget_years": budget_years,
         }
         # ── ENHANCED: Input validation ──
         _valid = True
@@ -1504,6 +1691,31 @@ with tab_results:
                 t_stor_sav = sum(r["outputs"].get("storage_tiers", {}).get("savings_monthly", 0) * 12 for r in results)
                 mc("Storage Optimization", fp(t_stor_sav) + "/yr savings", "Tiered storage")
 
+        # Row 4: Budget-Grade executive summary
+        if show_budget:
+            t_support = sum(r["outputs"].get("budget_support", {}).get("annual_cost", 0) for r in results)
+            t_mig_labor = sum(r["outputs"].get("budget_total_one_time", 0) for r in results)
+            t_aws_budget = sum(r["outputs"].get("budget_aws_all_in_annual", 0) for r in results)
+            t_az_budget = sum(r["outputs"].get("budget_azure_all_in_annual", 0) for r in results)
+            t_aws_low = sum(r["outputs"].get("budget_aws_confidence", {}).get("low_annual", 0) for r in results)
+            t_aws_high = sum(r["outputs"].get("budget_aws_confidence", {}).get("high_annual", 0) for r in results)
+            t_az_low = sum(r["outputs"].get("budget_azure_confidence", {}).get("low_annual", 0) for r in results)
+            t_az_high = sum(r["outputs"].get("budget_azure_confidence", {}).get("high_annual", 0) for r in results)
+
+            st.markdown("---")
+            st.markdown('<div class="section-header">💼 Budget-Grade Portfolio Summary</div>', unsafe_allow_html=True)
+            bi1, bi2, bi3, bi4, bi5 = st.columns(5)
+            with bi1: mc("Support Plans", fp(t_support) + "/yr", "All servers combined")
+            with bi2: mc("Migration One-Time", fp(t_mig_labor), "Labor + Testing + Transfer", "metric-yellow")
+            with bi3: mc("AWS Budget All-In", fp(t_aws_budget) + "/yr", f"Range: {fp(t_aws_low)} - {fp(t_aws_high)}")
+            with bi4: mc("Azure Budget All-In", fp(t_az_budget) + "/yr", f"Range: {fp(t_az_low)} - {fp(t_az_high)}", "metric-blue")
+            with bi5:
+                best_budget = min(t_aws_budget, t_az_budget)
+                budget_sav = t_op - best_budget
+                mc("Budget Savings", fp(abs(budget_sav)) + "/yr",
+                   f"{abs(budget_sav/max(1,t_op)*100):.1f}% vs On-Prem (incl. support)",
+                   "" if budget_sav > 0 else "metric-red")
+
         # On-Prem methodology (collapsed)
         with st.expander("📊 On-Prem Cost Methodology — Industry-Sourced Rates", expanded=False):
             st.markdown("""
@@ -1521,6 +1733,7 @@ with tab_results:
             | **Facility / Rack** | `$1,200/server/yr` | Colocation $1K-$2.5K/rack/mo, 42U rack shared |
             | **Admin & Labor** | `$1,500/server/yr` | 1 SysAdmin per 50-100 servers @ $80K-$120K salary |
             | **OS Licensing** | Per vCPU/mo | Win: $5.50, RHEL: $3.00, SUSE: $2.50, Linux: $0 |
+            | **DB Licensing** | Per vCPU/yr or flat | Oracle: $9,975/vCPU/yr, SQL Server Ent: $3,400, Std: $890; MongoDB: $10K/srv, Redis: $5K/srv |
 
             #### 🔷 Azure Local (Hybrid Option)
             - **Host fee:** $10/physical core/month (Linux guests)

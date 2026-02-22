@@ -63,6 +63,23 @@ def _format_enhanced_costs(outputs: Dict) -> str:
   Method: {rec.get('method', 'N/A')} | Cost: ${rec.get('cost', 0):,.2f}
   Duration: {rec.get('duration', 'N/A')}""")
 
+    # Budget-grade costs
+    bsup = outputs.get("budget_support", {})
+    bmig = outputs.get("budget_migration_labor", {})
+    aws_conf = outputs.get("budget_aws_confidence", {})
+    az_conf = outputs.get("budget_azure_confidence", {})
+    if bsup or bmig:
+        parts.append(f"""BUDGET-GRADE COSTS:
+  Support Plan: ${bsup.get('annual_cost', 0):,.2f}/yr ({bsup.get('support_tier', 'N/A')})
+  Migration Labor: ${bmig.get('migration_labor', 0):,.2f} | Testing: ${bmig.get('testing_validation', 0):,.2f}
+  Training: ${bmig.get('training', 0):,.2f} | Parallel Run: ${bmig.get('parallel_run', 0):,.2f}
+  Total One-Time: ${outputs.get('budget_total_one_time', 0):,.2f}
+  AWS Budget All-In: ${outputs.get('budget_aws_all_in_annual', 0):,.2f}/yr (IaaS+Net+DR+Support)
+  Azure Budget All-In: ${outputs.get('budget_azure_all_in_annual', 0):,.2f}/yr (IaaS+Net+DR+Support)
+  AWS Confidence: Low ${aws_conf.get('low_annual', 0):,.2f} | Budget ${aws_conf.get('budget_annual', 0):,.2f} | High ${aws_conf.get('high_annual', 0):,.2f}
+  Azure Confidence: Low ${az_conf.get('low_annual', 0):,.2f} | Budget ${az_conf.get('budget_annual', 0):,.2f} | High ${az_conf.get('high_annual', 0):,.2f}
+  Break-Even Year: {outputs.get('budget_summary', {}).get('breakeven_year', 'N/A')}""")
+
     return "\n\n".join(parts) if parts else "Enhanced cost modules not available."
 
 
@@ -95,6 +112,7 @@ SERVER PROFILE:
   OS EOL Status: {inputs.get('os_eol_status','N/A')}
   Proposed Migration: {inputs.get('migration_type','N/A')}
   Databases/Caches: {inputs.get('databases_caches','None')}
+  DB License Cost (On-Prem): ${outputs.get('db_licensing_annual', 0):,.2f}/yr ({outputs.get('db_licensing_name', 'None')})
   App Services: {inputs.get('app_services','None')}
 
 RESOURCE UTILIZATION:
@@ -108,6 +126,7 @@ RESOURCE UTILIZATION:
 RIGHT-SIZING RESULTS:
   Original to Right-Sized: {inputs.get('vcpu_count',0)} to {outputs.get('right_sizing_cpu','N/A')} vCPU | {inputs.get('memory_gb',0)} to {outputs.get('right_sizing_memory','N/A')} GB
   Storage: {inputs.get('total_storage_gb',0)} to {outputs.get('right_sizing_storage','N/A')} GB
+  Instance Family: {outputs.get('_instance_family', 'general')} | DR Strategy: {outputs.get('_dr_strategy', 'pilot_light')}
 
 CROSS-PROVIDER COST COMPARISON (Annual, 3yr Reserved):
   AWS:         ${aws_ann:>12,.2f}/yr  Instance: {xp.get('AWS',{}).get('instance_type','N/A')} ({xp.get('AWS',{}).get('vcpu',0)} vCPU / {xp.get('AWS',{}).get('memory',0)} GB)
@@ -115,7 +134,7 @@ CROSS-PROVIDER COST COMPARISON (Annual, 3yr Reserved):
   Azure Local: ${azl.get('recommended_annual',0):>12,.2f}/yr  Scenario: {azl.get('recommended_label','N/A')}
     Linux: ${azl.get('linux_total_annual',0):,.2f}  |  Windows: ${azl.get('windows_total_annual',0):,.2f}  |  AHB: ${azl.get('ahb_total_annual',0):,.2f}
   On-Premises: ${outputs.get('on_prem_yearly_cost',0):>12,.2f}/yr
-    Hardware: ${bk.get('hw_total',0):,.2f} | Power: ${bk.get('power_cooling',0):,.2f} | Facility: ${bk.get('facility',0):,.2f} | Labor: ${bk.get('admin_labor',0):,.2f} | License: ${bk.get('annual_licensing',0):,.2f}
+    Hardware: ${bk.get('hw_total',0):,.2f} | Power: ${bk.get('power_cooling',0):,.2f} | Facility: ${bk.get('facility',0):,.2f} | Labor: ${bk.get('admin_labor',0):,.2f} | OS License: ${bk.get('annual_licensing',0):,.2f} | DB License: ${bk.get('db_licensing_annual',0):,.2f}
 
 ALL-IN CLOUD ANNUAL (IaaS + Network + DR/Backup):
   AWS All-In:   ${aws_all_in:>12,.2f}/yr
@@ -170,12 +189,12 @@ Create a comparison table showing each option's annual cost, all-in annual cost 
 
 ### GAPS & MISSING CONSIDERATIONS
 Proactively identify what might be MISSING from this migration plan:
-- **Licensing gaps**: Are there application licenses (Oracle, SQL Server, SAP) not captured? BYOL opportunities?
+- **Licensing gaps**: DB licensing detected: {outputs.get('db_licensing_name', 'None')}. Are there additional application licenses (SAP, middleware) not captured? BYOL opportunities for {inputs.get('databases_caches','None')}?
 - **Network dependencies**: Inter-server communication, latency requirements between this server and others
 - **Security requirements**: Compliance frameworks (SOC2, HIPAA, PCI-DSS) that affect placement
 - **Data residency**: Any geographic or regulatory constraints on where data can be hosted?
 - **Operational readiness**: Team skills gap for the recommended cloud platform? Training needed?
-- **Hidden costs**: Support plans, monitoring, logging, WAF, DDoS protection, DNS hosting not in the estimate
+- **Hidden costs**: Monitoring, logging, WAF, DDoS protection, DNS hosting
 - **Performance testing**: Load testing needed before cutover? Benchmark requirements?
 - **Backup/DR validation**: Is the current DR strategy adequate for cloud?
 
@@ -185,12 +204,14 @@ Proactively identify what might be MISSING from this migration plan:
 - Compliance / licensing risks
 - Operational risks during transition
 
-### 3-YEAR TCO PROJECTION
-Project 3-year total cost for the recommended option vs on-prem. Include:
-- Migration one-time costs (15-20% of Year 1 savings)
-- All-in costs (compute + network + DR/backup + storage)
-- Show cumulative savings
-- Break-even point
+### BUDGET-GRADE TCO PROJECTION
+Use the CALCULATED budget data (not estimates):
+- Migration one-time: ${outputs.get('budget_total_one_time', 0):,.2f} (labor + testing + training + parallel run + data transfer)
+- Budget All-In Annual ({outputs.get('budget_best_cloud', 'N/A')}): ${outputs.get(f"budget_{outputs.get('budget_best_cloud', 'aws').lower()}_all_in_annual", 0):,.2f}/yr (IaaS + Network + DR + Support)
+- Confidence range: Low ${outputs.get(f"budget_{outputs.get('budget_best_cloud', 'aws').lower()}_confidence", {{}}).get('low_annual', 0):,.2f} to High ${outputs.get(f"budget_{outputs.get('budget_best_cloud', 'aws').lower()}_confidence", {{}}).get('high_annual', 0):,.2f}
+- Budget with 10% contingency: ${outputs.get(f"budget_{outputs.get('budget_best_cloud', 'aws').lower()}_confidence", {{}}).get('budget_annual', 0):,.2f}/yr
+- Break-even: Year {outputs.get('budget_summary', {{}}).get('breakeven_year', 'N/A')}
+- Present a 3-year total: Cloud vs On-Prem cumulative (including Year 0 migration)
 
 Be concrete, use actual $ figures from the data, and make clear recommendations. Never say "it depends" — commit to a recommendation."""
 
@@ -221,6 +242,13 @@ def get_batch_ai_summary(all_results: List[Dict], api_key: str) -> Optional[str]
         t_net = sum(r["outputs"].get("network_costs", {}).get("total_annual", 0) for r in all_results)
         t_dr = sum(r["outputs"].get("dr_backup_costs", {}).get("combined_annual", 0) for r in all_results)
         t_stor_save = sum(r["outputs"].get("storage_tiers", {}).get("savings_monthly", 0) * 12 for r in all_results)
+        t_db_lic = sum(r["outputs"].get("db_licensing_annual", 0) for r in all_results)
+
+        # Budget-grade aggregates
+        t_support = sum(r["outputs"].get("budget_support", {}).get("annual_cost", 0) for r in all_results)
+        t_mig_labor = sum(r["outputs"].get("budget_total_one_time", 0) for r in all_results)
+        t_aws_budget = sum(r["outputs"].get("budget_aws_all_in_annual", 0) for r in all_results)
+        t_az_budget = sum(r["outputs"].get("budget_azure_all_in_annual", 0) for r in all_results)
 
         # All-In
         t_aws_allin = t_aws + t_net + t_dr
@@ -252,8 +280,9 @@ def get_batch_ai_summary(all_results: List[Dict], api_key: str) -> Optional[str]
             if "Yes" in str(eol):
                 eols[host] = eol
             db = inp.get("databases_caches", "None")
+            db_lic = out.get("db_licensing_annual", 0)
             if db and db != "None":
-                dbs[host] = db
+                dbs[host] = f"{db} (${db_lic:,.0f}/yr license)" if db_lic > 0 else db
 
             cpu = float(inp.get("avg_cpu_usage", 50))
             mem = float(inp.get("avg_memory_usage", 50))
@@ -278,9 +307,12 @@ def get_batch_ai_summary(all_results: List[Dict], api_key: str) -> Optional[str]
             if rs_cpu < orig_cpu * 0.7 or rs_mem < orig_mem * 0.7:
                 sizing_details.append(f"  - {host}: {int(orig_cpu)} to {int(rs_cpu)} vCPU, {orig_mem:.0f} to {rs_mem:.0f}GB RAM ({cpu:.0f}% CPU / {mem:.0f}% mem)")
 
-            # PaaS candidates (web, API, app servers with managed DB)
+            # PaaS candidates: web/API/app without DB -> compute PaaS; DB servers -> managed DB PaaS
+            paas_ann = (out.get('paas_reserved_3yr', 0) + out.get('paas_licensing', 0) + out.get('paas_storage_price', 0)) * 12
             if s in ("Web Server", "API Gateway", "Application Server") and db in ("None", "", None):
-                paas_candidates.append(f"  - {host} ({s}, {e}): PaaS annual ${(out.get('paas_reserved_3yr',0)+out.get('paas_licensing',0)+out.get('paas_storage_price',0))*12:,.0f}")
+                paas_candidates.append(f"  - {host} ({s}, {e}): Compute PaaS ${paas_ann:,.0f}/yr")
+            elif s == "Database Server" or (db and db not in ("None", "")):
+                paas_candidates.append(f"  - {host} ({s}, {db}): Managed DB PaaS ${paas_ann:,.0f}/yr (saves ${db_lic:,.0f}/yr DB license)")
 
             # Serverless candidates
             mod = out.get("modern_options", {})
@@ -321,11 +353,18 @@ ANNUAL COST COMPARISON:
   Azure (3yr RI):    ${t_az:>13,.0f}  (savings: ${t_op-t_az:>10,.0f}, {((t_op-t_az)/max(1,t_op)*100):.1f}%)
   Azure Local:       ${t_azl:>13,.0f}  (savings: ${t_op-t_azl:>10,.0f}, {((t_op-t_azl)/max(1,t_op)*100):.1f}%)
   PaaS (3yr RI):     ${t_paas:>13,.0f}  (savings: ${t_op-t_paas:>10,.0f}, {((t_op-t_paas)/max(1,t_op)*100):.1f}%)
+  DB Licensing (On-Prem): ${t_db_lic:>10,.0f}  (included in On-Prem total; eliminated when migrating to managed PaaS)
 
 ALL-IN CLOUD ANNUAL (IaaS + Network + DR/Backup):
   AWS All-In:        ${t_aws_allin:>13,.0f}  (network: ${t_net:,.0f} + DR/Backup: ${t_dr:,.0f})
   Azure All-In:      ${t_az_allin:>13,.0f}
   Storage Tier Savings: ${t_stor_save:>10,.0f}/yr potential
+
+BUDGET-GRADE PORTFOLIO TOTALS (IaaS + Network + DR + Support):
+  Support Plans:     ${t_support:>13,.0f}/yr (all servers)
+  Migration One-Time: ${t_mig_labor:>12,.0f} (labor + testing + training + parallel run + transfer)
+  AWS Budget All-In: ${t_aws_budget:>13,.0f}/yr
+  Azure Budget All-In: ${t_az_budget:>12,.0f}/yr
 
 UTILIZATION INSIGHTS:
   High CPU (>80%): {', '.join(high_cpu[:8]) if high_cpu else 'None'}
@@ -421,13 +460,15 @@ For each risk, state: Description, Impacted Servers, Severity (High/Med/Low), Mi
 - Licensing compliance during transition
 - Operational knowledge gaps
 
-### 3-YEAR FINANCIAL PROJECTION
-Project Year 1 / Year 2 / Year 3 costs for the recommended approach:
-- Include one-time migration costs (estimate 15-20% of Year 1 savings)
-- Show all-in costs (compute + network + DR + storage optimization)
-- Show cumulative savings vs staying on-prem
+### BUDGET-GRADE FINANCIAL PROJECTION
+Use the CALCULATED budget data (not estimates):
+- Year 0 Migration Investment: ${t_mig_labor:,.0f} (labor + testing + training + parallel run + transfer)
+- Annual Cloud Run Rate: AWS ${t_aws_budget:,.0f}/yr | Azure ${t_az_budget:,.0f}/yr (IaaS + Network + DR + Support)
+- Support Plans: ${t_support:,.0f}/yr across all servers
+- Present P10/P50/P90 confidence range for the recommended option
+- 3-year total: Cloud vs On-Prem cumulative (cloud -5%/yr deflation, on-prem +3-5%/yr inflation)
+- Recommended annual budget (P50 + 10% contingency)
 - Break-even timeline
-- Total 3-year savings
 
 ### TOP 5 IMMEDIATE ACTIONS
 Numbered, specific, actionable items with expected $ impact each. Include which team (Infra, DBA, Finance, Procurement) owns each action.

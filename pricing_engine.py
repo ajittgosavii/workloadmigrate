@@ -54,6 +54,22 @@ try:
 except ImportError:
     HAS_SERVERLESS = False
 
+try:
+    from scenario_engine import PRICE_TRENDS, DATABASE_COMPLEXITY
+    HAS_SCENARIO = True
+except ImportError:
+    HAS_SCENARIO = False
+    PRICE_TRENDS = {
+        "cloud_annual_decrease": -0.05, "on_prem_hw_increase": 0.03,
+        "on_prem_power_increase": 0.04, "on_prem_labor_increase": 0.05,
+        "on_prem_licensing_increase": 0.03,
+    }
+    DATABASE_COMPLEXITY = {
+        "None": 1.0, "MySQL": 1.5, "PostgreSQL": 1.5, "MariaDB": 1.5,
+        "SQL Server": 2.0, "Oracle": 3.0, "MongoDB": 1.8, "Redis": 1.2,
+        "Memcached": 1.1, "DynamoDB": 1.3, "Cassandra": 2.0,
+    }
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGION MAPS — used only for API query parameters
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -517,7 +533,50 @@ def compute_licensing(os: str, vcpu: int) -> float:
     return 0.0
 
 
-def compute_on_prem(vcpu: int, mem: float, stor: float, os: str) -> Tuple[float, Dict]:
+def compute_db_licensing(databases: str, vcpu: int) -> Tuple[float, str]:
+    """Database software licensing (on-prem, amortized annual cost).
+
+    Sources:
+      Oracle Enterprise: Oracle Technology Global Price List (oracle.com/contracts)
+        $47,500/processor, x86 core factor 0.5, 5-yr amortization + 22% annual support
+      SQL Server Enterprise: Microsoft Volume Licensing (microsoft.com/licensing)
+        $15,123/2-core pack, 5-yr amortization + 25% Software Assurance
+      SQL Server Standard: $3,945/2-core pack, same amortization model
+      MongoDB Enterprise Advanced: mongodb.com/pricing (~$10,000/server/yr flat)
+      Redis Enterprise: redis.com/pricing (~$5,000/server/yr flat)
+      MySQL/PostgreSQL/MariaDB/Memcached/Cassandra/DynamoDB: Open source or N/A = $0
+    """
+    dl = str(databases).lower()
+    if dl in ("none", "", "n/a"):
+        return 0.0, "No database license"
+
+    # Free / open-source — check first to avoid false matches
+    FREE_DBS = ["mysql", "postgres", "mariadb", "memcache", "cassandra", "dynamo"]
+    for free_db in FREE_DBS:
+        if free_db in dl:
+            return 0.0, f"{databases} (open source — $0)"
+
+    # Commercial per-vCPU licenses (amortized 5yr + annual support/SA)
+    if "oracle" in dl:
+        annual = vcpu * 9975.0
+        return round(annual, 2), f"Oracle DB Enterprise (${9975:,}/vCPU/yr x {vcpu} vCPU)"
+    if "sql server" in dl and "standard" in dl:
+        annual = vcpu * 890.0
+        return round(annual, 2), f"SQL Server Standard (${890:,}/vCPU/yr x {vcpu} vCPU)"
+    if "sql server" in dl:
+        annual = vcpu * 3400.0
+        return round(annual, 2), f"SQL Server Enterprise (${3400:,}/vCPU/yr x {vcpu} vCPU)"
+
+    # Commercial flat-rate licenses
+    if "mongo" in dl:
+        return 10000.0, "MongoDB Enterprise ($10,000/server/yr)"
+    if "redis" in dl:
+        return 5000.0, "Redis Enterprise ($5,000/server/yr)"
+
+    return 0.0, "No database license"
+
+
+def compute_on_prem(vcpu: int, mem: float, stor: float, os: str, databases: str = "None") -> Tuple[float, Dict]:
     """
     Industry-sourced On-Premises / Data Center TCO calculation.
     Returns (total_yearly, breakdown_dict) with full transparency.
@@ -612,7 +671,10 @@ def compute_on_prem(vcpu: int, mem: float, stor: float, os: str) -> Tuple[float,
         lic_name = "SUSE ($2.50/vCPU/mo)"
     annual_licensing = vcpu * lic_rate * 12
 
-    total = hw_total + power_cooling + facility + admin_labor + annual_licensing
+    # Database Software Licensing (8th component)
+    db_lic_annual, db_lic_name = compute_db_licensing(databases, vcpu)
+
+    total = hw_total + power_cooling + facility + admin_labor + annual_licensing + db_lic_annual
 
     breakdown = {
         "hw_compute": round(hw_cpu, 2),
@@ -629,6 +691,8 @@ def compute_on_prem(vcpu: int, mem: float, stor: float, os: str) -> Tuple[float,
         "licensing_rate_per_vcpu": lic_rate,
         "licensing_name": lic_name,
         "annual_licensing": round(annual_licensing, 2),
+        "db_licensing_annual": round(db_lic_annual, 2),
+        "db_licensing_name": db_lic_name,
         # Source citations for UI display
         "sources": {
             "compute": "Dell PowerEdge R760 pricing, 5-yr amortization (dell.com)",
@@ -638,26 +702,60 @@ def compute_on_prem(vcpu: int, mem: float, stor: float, os: str) -> Tuple[float,
             "facility": "ENCOR Advisors & Brightlio Colocation Pricing Guide (2025)",
             "labor": "Gartner IT staffing benchmarks, Sherweb TCO Analysis",
             "licensing": "Dell PowerEdge configurator (dell.com/poweredge-r760)",
+            "db_licensing": "Oracle price list (oracle.com), MS Volume Licensing, mongodb.com, redis.com",
         },
     }
     return round(total, 2), breakdown
 
 
-def determine_paas(cloud: str, dbs: str) -> Tuple[str, str]:
+def determine_paas(cloud: str, dbs: str, server_type: str = "Application Server") -> Tuple[str, str]:
     db = str(dbs).lower()
-    aws_map = {"postgres": ("Amazon RDS", "Aurora PostgreSQL"), "mysql": ("Amazon RDS", "Aurora MySQL"),
-               "mariadb": ("Amazon RDS", "Aurora MySQL"), "oracle": ("Amazon RDS", "RDS for Oracle"),
-               "sql server": ("Amazon RDS", "RDS for SQL Server"), "mongo": ("Amazon DocumentDB", "DocumentDB"),
-               "redis": ("Amazon ElastiCache", "ElastiCache Redis"), "memcache": ("Amazon ElastiCache", "ElastiCache Memcached"),
-               "dynamo": ("Amazon DynamoDB", "DynamoDB"), "cassandra": ("Amazon Keyspaces", "Keyspaces")}
-    az_map = {"postgres": ("Azure Database", "Azure DB for PostgreSQL"), "mysql": ("Azure Database", "Azure DB for MySQL"),
-              "mariadb": ("Azure Database", "Azure DB for MySQL"), "sql server": ("Azure SQL", "Azure SQL Database"),
-              "mongo": ("Azure Cosmos DB", "Cosmos DB (MongoDB API)"), "redis": ("Azure Cache", "Azure Cache for Redis"),
-              "oracle": ("Azure Database", "Azure DB for PostgreSQL"), "cassandra": ("Azure Cosmos DB", "Cosmos DB (Cassandra API)")}
-    m = aws_map if cloud == "AWS" else az_map
+    # ── Database-keyword matching (highest priority) ──
+    aws_db_map = {"postgres": ("Amazon RDS", "Aurora PostgreSQL"), "mysql": ("Amazon RDS", "Aurora MySQL"),
+                  "mariadb": ("Amazon RDS", "Aurora MySQL"), "oracle": ("Amazon RDS", "RDS for Oracle"),
+                  "sql server": ("Amazon RDS", "RDS for SQL Server"), "mongo": ("Amazon DocumentDB", "DocumentDB"),
+                  "redis": ("Amazon ElastiCache", "ElastiCache Redis"), "memcache": ("Amazon ElastiCache", "ElastiCache Memcached"),
+                  "dynamo": ("Amazon DynamoDB", "DynamoDB"), "cassandra": ("Amazon Keyspaces", "Keyspaces")}
+    az_db_map = {"postgres": ("Azure Database", "Azure DB for PostgreSQL"), "mysql": ("Azure Database", "Azure DB for MySQL"),
+                 "mariadb": ("Azure Database", "Azure DB for MySQL"), "sql server": ("Azure SQL", "Azure SQL Database"),
+                 "mongo": ("Azure Cosmos DB", "Cosmos DB (MongoDB API)"), "redis": ("Azure Cache", "Azure Cache for Redis"),
+                 "memcache": ("Azure Cache", "Azure Cache for Redis"),
+                 "oracle": ("Azure Database", "Azure DB for PostgreSQL"), "cassandra": ("Azure Cosmos DB", "Cosmos DB (Cassandra API)")}
+    m = aws_db_map if cloud == "AWS" else az_db_map
     for k, v in m.items():
         if k in db: return v
-    return ("Amazon RDS", "Aurora PostgreSQL") if cloud == "AWS" else ("Azure SQL", "Azure SQL Database")
+
+    # ── Server-type fallback for non-DB workloads ──
+    aws_stype_map = {
+        "web server":          ("AWS App Runner", "App Runner"),
+        "application server":  ("AWS Elastic Beanstalk", "Elastic Beanstalk"),
+        "api gateway":         ("Amazon API Gateway", "API Gateway"),
+        "cache server":        ("Amazon ElastiCache", "ElastiCache Redis"),
+        "file server":         ("Amazon EFS", "EFS"),
+        "mail server":         ("Amazon SES", "SES + WorkMail"),
+        "load balancer":       ("Elastic Load Balancing", "ALB"),
+        "monitoring":          ("Amazon CloudWatch", "CloudWatch"),
+        "ci/cd":               ("AWS CodePipeline", "CodePipeline"),
+    }
+    az_stype_map = {
+        "web server":          ("Azure App Service", "App Service"),
+        "application server":  ("Azure App Service", "App Service"),
+        "api gateway":         ("Azure API Management", "API Management"),
+        "cache server":        ("Azure Cache", "Azure Cache for Redis"),
+        "file server":         ("Azure Files", "Azure Files"),
+        "mail server":         ("Microsoft 365", "Exchange Online"),
+        "load balancer":       ("Azure Load Balancer", "Application Gateway"),
+        "monitoring":          ("Azure Monitor", "Azure Monitor"),
+        "ci/cd":               ("Azure DevOps", "Azure Pipelines"),
+    }
+    stype_map = aws_stype_map if cloud == "AWS" else az_stype_map
+    st_lower = str(server_type).lower()
+    for key, val in stype_map.items():
+        if key in st_lower:
+            return val
+
+    # General-purpose compute PaaS fallback
+    return ("AWS App Runner", "App Runner") if cloud == "AWS" else ("Azure App Service", "App Service")
 
 
 def determine_target_os(os: str, eol: str) -> str:
@@ -766,7 +864,7 @@ AZURE_LOCAL_RATES = {
 }
 
 
-def compute_azure_local(vcpu: int, mem: float, stor: float, os: str) -> Dict:
+def compute_azure_local(vcpu: int, mem: float, stor: float, os: str, databases: str = "None") -> Dict:
     """
     Azure Local (Azure Stack HCI) pricing — hybrid on-prem + Azure management.
     Uses existing on-prem hardware costs + Azure Local service fees.
@@ -780,8 +878,9 @@ def compute_azure_local(vcpu: int, mem: float, stor: float, os: str) -> Dict:
     r = AZURE_LOCAL_RATES
 
     # On-prem hardware costs (same hardware, just adding Azure management layer)
-    on_prem_total, on_prem_bkdn = compute_on_prem(vcpu, mem, stor, os)
+    on_prem_total, on_prem_bkdn = compute_on_prem(vcpu, mem, stor, os, databases)
     # Remove on-prem OS licensing since Azure Local handles it differently
+    # DB licensing stays — it's still needed on Azure Local (BYOL)
     hw_and_ops = on_prem_total - on_prem_bkdn.get("annual_licensing", 0)
 
     # Scenario 1: Linux guest — host fee only ($10/core/mo)
@@ -828,6 +927,298 @@ def compute_azure_local(vcpu: int, mem: float, stor: float, os: str) -> Dict:
                                "Azure Local bills per physical processor core (no HT).",
         "source": "Azure Local Pricing (azure.microsoft.com/en-us/pricing/details/azure-local/), "
                   "Microsoft Q&A, techielass.com (Feb 2025).",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BUDGET-GRADE COST FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── Support plan pricing ────────────────────────────────────────────────────
+AWS_SUPPORT_TIERS = {
+    "business": [
+        (10_000, 0.10),       # First $10K/mo: 10%
+        (10_000, 0.07),       # $10K-$20K: 7%
+        (60_000, 0.05),       # $20K-$80K: 5%
+        (float("inf"), 0.03), # $80K+: 3%
+    ],
+    "enterprise": 0.15,       # Simplified 15% flat
+    "developer": 0.03,        # 3% ($29/mo minimum)
+    "none": 0.0,
+}
+
+AZURE_SUPPORT_TIERS = {
+    "standard": 100.0,           # $100/mo flat
+    "professional_direct": 1000.0,  # $1,000/mo flat
+    "none": 0.0,
+}
+
+
+def calculate_support_plan_costs(
+    cloud: str,
+    monthly_cloud_spend: float,
+    support_tier: str = "business",
+) -> Dict:
+    """
+    Calculate cloud support plan costs.
+
+    Sources:
+      AWS:   aws.amazon.com/premiumsupport/pricing/
+      Azure: azure.microsoft.com/en-us/support/plans/
+    """
+    monthly_cost = 0.0
+    tier = support_tier.lower()
+
+    if cloud == "AWS":
+        if tier == "none":
+            monthly_cost = 0.0
+        elif tier == "enterprise":
+            monthly_cost = max(15_000, monthly_cloud_spend * 0.15)
+        elif tier == "developer":
+            monthly_cost = max(29, monthly_cloud_spend * 0.03)
+        else:  # business (default)
+            remaining = monthly_cloud_spend
+            tiers = AWS_SUPPORT_TIERS["business"]
+            for bracket, rate in tiers:
+                chunk = min(remaining, bracket)
+                if chunk <= 0:
+                    break
+                monthly_cost += chunk * rate
+                remaining -= chunk
+    else:  # Azure
+        if tier == "professional_direct":
+            monthly_cost = AZURE_SUPPORT_TIERS["professional_direct"]
+        elif tier == "none":
+            monthly_cost = 0.0
+        else:  # standard (default)
+            monthly_cost = AZURE_SUPPORT_TIERS["standard"]
+
+    return {
+        "support_tier": tier,
+        "monthly_cost": round(monthly_cost, 2),
+        "annual_cost": round(monthly_cost * 12, 2),
+        "pct_of_spend": round((monthly_cost / max(1, monthly_cloud_spend)) * 100, 1),
+        "source": ("aws.amazon.com/premiumsupport/pricing/"
+                    if cloud == "AWS"
+                    else "azure.microsoft.com/en-us/support/plans/"),
+    }
+
+
+# ─── Migration labor pricing ────────────────────────────────────────────────
+MIGRATION_LABOR_RATES = {
+    "Rehost": {"labor": 5_000, "testing_pct": 0.15, "duration_weeks": 1},
+    "Rehost (Lift & Shift)": {"labor": 5_000, "testing_pct": 0.15, "duration_weeks": 1},
+    "Replatform": {"labor": 12_000, "testing_pct": 0.18, "duration_weeks": 3},
+    "Refactor": {"labor": 25_000, "testing_pct": 0.20, "duration_weeks": 8},
+    "Repurchase": {"labor": 8_000, "testing_pct": 0.15, "duration_weeks": 4},
+    "Retire": {"labor": 1_000, "testing_pct": 0.05, "duration_weeks": 0.5},
+    "Retain": {"labor": 0, "testing_pct": 0.00, "duration_weeks": 0},
+}
+
+SERVER_COMPLEXITY_SURCHARGE = {
+    "Database Server": 1.5, "Mail Server": 1.3, "File Server": 1.2,
+    "Application Server": 1.0, "Web Server": 0.8, "API Gateway": 0.8,
+    "Cache Server": 0.7, "Load Balancer": 0.6, "Monitoring": 0.5, "CI/CD": 0.5,
+}
+
+
+def calculate_migration_labor_costs(
+    server_type: str,
+    databases: str,
+    migration_type: str = "Rehost",
+    vcpu_count: int = 4,
+    total_storage_gb: float = 200,
+    environment: str = "Production",
+    on_prem_yearly_cost: float = 0,
+) -> Dict:
+    """
+    Calculate one-time migration costs: labor, testing, training, parallel run.
+
+    Sources:
+      Gartner Migration TCO benchmarks
+      AWS Migration Acceleration Program guidelines
+      Azure Migrate assessment methodology
+    """
+    rates = MIGRATION_LABOR_RATES.get(migration_type, MIGRATION_LABOR_RATES["Rehost"])
+    base_labor = rates["labor"]
+    testing_pct = rates["testing_pct"]
+    duration_weeks = rates["duration_weeks"]
+
+    # Server-type complexity surcharge
+    server_mult = SERVER_COMPLEXITY_SURCHARGE.get(server_type, 1.0)
+
+    # Database complexity multiplier (reuses scenario_engine constants)
+    db_mult = 1.0
+    dl = str(databases).lower()
+    for db_name, mult in DATABASE_COMPLEXITY.items():
+        if db_name.lower() in dl:
+            db_mult = mult
+            break
+
+    # Size multiplier for large servers
+    size_mult = 1.0
+    if vcpu_count > 32:
+        size_mult += 0.5
+    elif vcpu_count > 16:
+        size_mult += 0.2
+    if total_storage_gb > 10_000:
+        size_mult += 0.5
+    elif total_storage_gb > 2_000:
+        size_mult += 0.3
+
+    labor = round(base_labor * server_mult * db_mult * size_mult, 2)
+    testing = round(labor * testing_pct, 2)
+    training = 350.0  # $3,500 per team member × 0.1 allocation per server
+
+    # Parallel run: run on-prem during cutover (Prod=2mo, non-Prod=1mo)
+    on_prem_monthly = on_prem_yearly_cost / 12
+    parallel_months = 2 if environment == "Production" else 1
+    parallel_run = round(on_prem_monthly * parallel_months, 2)
+
+    # Retain = truly zero
+    if migration_type == "Retain":
+        labor, testing, training, parallel_run = 0, 0, 0, 0
+
+    total = round(labor + testing + training + parallel_run, 2)
+
+    return {
+        "migration_labor": labor,
+        "testing_validation": testing,
+        "training": training,
+        "parallel_run": parallel_run,
+        "total_one_time": total,
+        "complexity_factors": {
+            "server_type_mult": server_mult,
+            "db_complexity_mult": db_mult,
+            "size_mult": size_mult,
+        },
+        "estimated_duration_weeks": duration_weeks,
+        "source": "Gartner Migration TCO, AWS MAP, Azure Migrate benchmarks",
+    }
+
+
+# ─── Confidence ranges ──────────────────────────────────────────────────────
+def calculate_confidence_ranges(base_annual: float, cloud: str) -> Dict:
+    """
+    Calculate budget confidence bands (P10/P50/P90) with contingency.
+
+    P10 (Low):  -15% — negotiated EDP/ELA, full right-sizing, spot
+    P50 (Exp):   0%  — base calculation with 3yr RI
+    P90 (High): +25% — on-demand overflow, data growth, egress
+    Contingency: 10% of expected (Gartner/McKinsey standard)
+    """
+    low = round(base_annual * 0.85, 2)
+    expected = round(base_annual, 2)
+    high = round(base_annual * 1.25, 2)
+    contingency = round(expected * 0.10, 2)
+    budget = round(expected + contingency, 2)
+
+    return {
+        "low_annual": low,
+        "expected_annual": expected,
+        "high_annual": high,
+        "contingency_amount": contingency,
+        "contingency_pct": 10.0,
+        "budget_annual": budget,
+        "range_low_pct": -15,
+        "range_high_pct": 25,
+        "assumptions": {
+            "low": "Negotiated EDP/ELA discounts, full right-sizing realized, spot/preemptible usage",
+            "expected": "Base calculation with 3yr RI pricing and recommended right-sizing",
+            "high": "On-demand overflow, 15% data growth, unexpected egress, learning curve waste",
+        },
+    }
+
+
+# ─── Multi-year budget summary ──────────────────────────────────────────────
+def calculate_budget_summary(
+    cloud_annual: float,
+    on_prem_annual: float,
+    support_annual: float,
+    network_annual: float,
+    dr_backup_annual: float,
+    migration_one_time: float,
+    migration_transfer_cost: float,
+    on_prem_breakdown: Dict,
+    years: int = 3,
+) -> Dict:
+    """
+    Multi-year TCO projection with break-even analysis.
+
+    Uses PRICE_TRENDS from scenario_engine:
+      Cloud -5%/yr, On-prem HW +3%/yr, Power +4%/yr, Labor +5%/yr, License +3%/yr
+    """
+    # Year 0: migration costs + 6 months prorated cloud run-rate
+    cloud_run_rate = cloud_annual + network_annual + dr_backup_annual + support_annual
+    year_0_cloud_prorated = round(cloud_run_rate * 0.5, 2)
+    year_0_total = round(migration_one_time + migration_transfer_cost + year_0_cloud_prorated, 2)
+
+    # On-prem Year 0 = 6 months (running in parallel)
+    year_0_on_prem = round(on_prem_annual * 0.5, 2)
+
+    yearly = []
+    cumulative_cloud = year_0_total
+    cumulative_on_prem = year_0_on_prem
+    breakeven_year = None
+
+    # Extract on-prem component costs for inflation modeling
+    hw = on_prem_breakdown.get("hw_total", on_prem_annual * 0.30)
+    pwr = on_prem_breakdown.get("power_cooling", on_prem_annual * 0.15)
+    fac = on_prem_breakdown.get("facility", on_prem_annual * 0.10)
+    labor = on_prem_breakdown.get("admin_labor", on_prem_annual * 0.10)
+    lic = on_prem_breakdown.get("annual_licensing", 0) + on_prem_breakdown.get("db_licensing_annual", 0)
+
+    for yr in range(1, years + 1):
+        # Cloud costs decrease ~5%/yr
+        cloud_mult = (1 + PRICE_TRENDS["cloud_annual_decrease"]) ** yr
+        yr_cloud_compute = round(cloud_annual * cloud_mult, 2)
+        yr_network = round(network_annual * cloud_mult, 2)
+        yr_dr = round(dr_backup_annual * cloud_mult, 2)
+        yr_support = round(support_annual, 2)  # support stays flat (contractual)
+        yr_cloud_total = round(yr_cloud_compute + yr_network + yr_dr + yr_support, 2)
+
+        # On-prem costs increase with inflation
+        yr_hw = hw * (1 + PRICE_TRENDS["on_prem_hw_increase"]) ** yr
+        yr_pwr = pwr * (1 + PRICE_TRENDS["on_prem_power_increase"]) ** yr
+        yr_fac = fac * (1 + PRICE_TRENDS["on_prem_hw_increase"]) ** yr  # facility ~ HW trend
+        yr_labor = labor * (1 + PRICE_TRENDS["on_prem_labor_increase"]) ** yr
+        yr_lic = lic * (1 + PRICE_TRENDS["on_prem_licensing_increase"]) ** yr
+        yr_on_prem = round(yr_hw + yr_pwr + yr_fac + yr_labor + yr_lic, 2)
+
+        cumulative_cloud += yr_cloud_total
+        cumulative_on_prem += yr_on_prem
+
+        yearly.append({
+            "year": yr,
+            "cloud_compute": yr_cloud_compute,
+            "network": yr_network,
+            "dr_backup": yr_dr,
+            "support": yr_support,
+            "total_cloud": yr_cloud_total,
+            "on_prem_projected": yr_on_prem,
+            "annual_savings": round(yr_on_prem - yr_cloud_total, 2),
+            "cumulative_cloud": round(cumulative_cloud, 2),
+            "cumulative_on_prem": round(cumulative_on_prem, 2),
+            "cumulative_savings": round(cumulative_on_prem - cumulative_cloud, 2),
+        })
+
+        if cumulative_on_prem > cumulative_cloud and breakeven_year is None:
+            breakeven_year = yr
+
+    return {
+        "projection_years": years,
+        "year_0": {
+            "migration_one_time": round(migration_one_time, 2),
+            "migration_transfer": round(migration_transfer_cost, 2),
+            "cloud_prorated": year_0_cloud_prorated,
+            "on_prem_prorated": year_0_on_prem,
+            "total": year_0_total,
+        },
+        "yearly": yearly,
+        "breakeven_year": breakeven_year,
+        "total_cloud_n_year": round(cumulative_cloud, 2),
+        "total_on_prem_n_year": round(cumulative_on_prem, 2),
+        "total_savings_n_year": round(cumulative_on_prem - cumulative_cloud, 2),
     }
 
 
@@ -913,22 +1304,33 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
     live_stor = fetch_azure_storage_pricing(AZURE_REGIONS.get(region, "eastus")) if pricing_cloud == "Azure" and pricing_source == "azure_api_live" else None
     sprice = compute_storage_price(pricing_cloud, stype, rs_stor, rmult, live_stor)
 
-    # PaaS
-    ps, pn = determine_paas(pricing_cloud, databases)
-    db_cat = _get_reference_catalog(pricing_cloud, "database")
-    pi = _match(db_cat, rs_cpu, rs_mem)
-    p_hr = pi.get("price_hr", pi.get("base_price_hr", 0)) * rmult
+    # PaaS — pass server_type so non-DB workloads get proper PaaS recommendation
+    ps, pn = determine_paas(pricing_cloud, databases, server_type)
+
+    # Choose catalog based on whether PaaS target is a database service
+    _paas_is_db = family == "database" or any(
+        k in str(databases).lower() for k in ["mysql", "postgres", "oracle", "sql server",
+                                                "mongo", "redis", "mariadb", "dynamo", "cassandra", "memcache"])
+    if _paas_is_db:
+        paas_cat = _get_reference_catalog(pricing_cloud, "database")
+        paas_markup = 1.0  # DB catalog prices already reflect managed service cost
+    else:
+        paas_cat = _get_reference_catalog(pricing_cloud, "general")
+        paas_markup = 1.30  # 30% PaaS platform markup over IaaS general pricing
+
+    pi = _match(paas_cat, rs_cpu, rs_mem)
+    p_hr = pi.get("price_hr", pi.get("base_price_hr", 0)) * rmult * paas_markup
     p_od = round(p_hr * MH, 2)
     p_1y = round(p_od * 0.60, 2)
     p_3y = round(p_od * 0.40, 2)
     p_sp = round(sprice * 1.2, 2)
     p_lic = round(rec_lic * 0.5, 2)
 
-    # On-prem with full breakdown
-    on_prem_total, on_prem_bkdn = compute_on_prem(vcpu_count, memory_gb, total_storage, os_name)
+    # On-prem with full breakdown (includes DB licensing as 8th component)
+    on_prem_total, on_prem_bkdn = compute_on_prem(vcpu_count, memory_gb, total_storage, os_name, databases)
 
     # Azure Local (formerly Azure Stack HCI) — hybrid option
-    azl = compute_azure_local(vcpu_count, memory_gb, total_storage, os_name)
+    azl = compute_azure_local(vcpu_count, memory_gb, total_storage, os_name, databases)
 
     # ── CROSS-PROVIDER COMPARISON ──────────────────────────────────────────────
     # Compute IaaS 3yr RI annual cost for BOTH AWS and Azure regardless of
@@ -979,6 +1381,14 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
 
     # ── ENHANCED: DR & Backup costs ──────────────────────────────────────
     environment = str(inputs.get("environment", "Production"))
+    # Auto-select DR strategy by server type (stateful servers get stronger DR)
+    _DR_STRATEGY_MAP = {
+        "Database Server": "warm_standby", "File Server": "warm_standby", "Mail Server": "warm_standby",
+        "Application Server": "pilot_light",
+        "Web Server": "backup_restore", "API Gateway": "backup_restore", "Cache Server": "backup_restore",
+        "Load Balancer": "backup_restore", "Monitoring": "backup_restore", "CI/CD": "backup_restore",
+    }
+    auto_dr_strategy = _DR_STRATEGY_MAP.get(server_type, "pilot_light")
     dr_backup_result = {"combined_monthly": 0, "combined_annual": 0,
                         "backup": {"total_monthly": 0}, "dr": {"total_monthly": 0}}
     if HAS_DR:
@@ -986,6 +1396,7 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
             dr_backup_result = calculate_total_dr_backup(
                 pricing_cloud, rec_od, total_storage, storage_pct,
                 server_type, environment, databases,
+                dr_strategy=auto_dr_strategy,
             )
         except Exception:
             pass
@@ -1024,6 +1435,52 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
         except Exception:
             pass
 
+    # ── BUDGET-GRADE: Support plan costs ─────────────────────────────────
+    support_tier = str(inputs.get("support_tier",
+                                  "business" if pricing_cloud == "AWS" else "standard"))
+    monthly_cloud_spend = rec_3y + rec_lic + sprice
+    budget_support = calculate_support_plan_costs(pricing_cloud, monthly_cloud_spend, support_tier)
+
+    # Cross-provider support and budget all-in
+    net_annual = network.get("total_annual", 0)
+    drb_annual = dr_backup_result.get("combined_annual", 0)
+    for xcloud in ["AWS", "Azure"]:
+        xp_monthly = xp[xcloud]["monthly_3yr_ri"]
+        xp_tier = "business" if xcloud == "AWS" else "standard"
+        xp[xcloud]["support"] = calculate_support_plan_costs(xcloud, xp_monthly, xp_tier)
+        xp[xcloud]["budget_all_in_annual"] = round(
+            xp[xcloud]["annual_3yr_ri"] + net_annual + drb_annual
+            + xp[xcloud]["support"]["annual_cost"], 2)
+
+    # ── BUDGET-GRADE: Migration labor costs ──────────────────────────────
+    migration_type = str(inputs.get("migration_type", "Rehost"))
+    budget_migration = calculate_migration_labor_costs(
+        server_type, databases, migration_type,
+        vcpu_count, total_storage, environment, on_prem_total,
+    )
+    migration_transfer_cost = migration_transfer.get("recommended", {}).get("cost", 0)
+    budget_total_one_time = round(budget_migration["total_one_time"] + migration_transfer_cost, 2)
+
+    # ── BUDGET-GRADE: Confidence ranges (per cloud) ──────────────────────
+    for xcloud in ["AWS", "Azure"]:
+        xp[xcloud]["confidence"] = calculate_confidence_ranges(
+            xp[xcloud]["budget_all_in_annual"], xcloud)
+
+    # ── BUDGET-GRADE: Multi-year budget summary ──────────────────────────
+    best_cloud_key = "AWS" if xp["AWS"]["budget_all_in_annual"] <= xp["Azure"]["budget_all_in_annual"] else "Azure"
+    budget_years = int(inputs.get("budget_years", 3))
+    budget_summary = calculate_budget_summary(
+        cloud_annual=xp[best_cloud_key]["annual_3yr_ri"],
+        on_prem_annual=on_prem_total,
+        support_annual=xp[best_cloud_key]["support"]["annual_cost"],
+        network_annual=net_annual,
+        dr_backup_annual=drb_annual,
+        migration_one_time=budget_migration["total_one_time"],
+        migration_transfer_cost=migration_transfer_cost,
+        on_prem_breakdown=on_prem_bkdn,
+        years=budget_years,
+    )
+
     return {
         "right_sizing_cpu": rs_cpu, "right_sizing_memory": rs_mem, "right_sizing_storage": rs_stor,
         "iaas_on_demand_price": iaas_od, "iaas_reserved_1yr_price": iaas_1y,
@@ -1049,6 +1506,19 @@ def calculate_all_outputs(inputs: Dict) -> Dict:
         "storage_tiers": storage_tiers,
         "modern_options": modern_options,
         "migration_transfer": migration_transfer,
+        "db_licensing_annual": on_prem_bkdn.get("db_licensing_annual", 0),
+        "db_licensing_name": on_prem_bkdn.get("db_licensing_name", "No database license"),
         "_cloud_provider": cloud, "_instance_family": family, "_region": region,
         "_hostname": str(inputs.get("host_name", "")), "_pricing_source": pricing_source,
+        "_dr_strategy": auto_dr_strategy,
+        # Budget-grade outputs
+        "budget_support": budget_support,
+        "budget_migration_labor": budget_migration,
+        "budget_total_one_time": budget_total_one_time,
+        "budget_aws_all_in_annual": xp["AWS"]["budget_all_in_annual"],
+        "budget_azure_all_in_annual": xp["Azure"]["budget_all_in_annual"],
+        "budget_aws_confidence": xp["AWS"]["confidence"],
+        "budget_azure_confidence": xp["Azure"]["confidence"],
+        "budget_summary": budget_summary,
+        "budget_best_cloud": best_cloud_key,
     }
